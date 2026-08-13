@@ -38,147 +38,282 @@
   </header>
 
   <main>
-    <section class="hero">
-      <div class="hero-grid">
-        <div class="hero-text">
-          <div class="eyebrow"><span class="tick"></span> Position paper — v0.1</div>
-          <h1>Detecting AI-written text is the wrong problem. Proving who wrote something, is the right one.</h1>
-          <p class="hero-sub">Viskopic builds authorship infrastructure: Verifiable, Cryptographic and Stylometric. We build evidences of provenance, rather than another classifier guessing whether a paragraph looks synthetic.</p>
-          <div class="byline">
-            <span><strong>Founders</strong> — Surisetti S.K., Soo C.B., Nguyen H. </span>
-            <span class="dot"></span>
-            <span>Building since 2026</span>
-            <span class="dot"></span>
-            <span>Bristol, UK</span>
-          </div>
-          <div class="hero-cta">
-            <a href="#contact" class="btn btn-primary">Get in touch</a>
-            <a href="#approach" class="btn btn-secondary">Read the approach</a>
-          </div>
+    <!-- ============ HERO ============ -->
+    <section class="hero" id="hero">
+      <canvas id="signal" aria-hidden="true"></canvas>
+      <!--
+        Drop a real video in when you have one: set the <source src="..."> below.
+        Best fit for the brief: a camera slowly pushing in on printed text / a
+        physical book from a couple of different angles, muted, looping.
+        Until a src is set, the canvas signal animation above stays visible as
+        the background — the video fades in on top automatically once it loads.
+      -->
+      <video id="heroVideo" class="hero-video" autoplay muted loop playsinline aria-hidden="true">
+        <source src="" type="video/mp4">
+      </video>
+      <div class="hero-vignette" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <div class="eyebrow eyebrow-dark"><span class="tick"></span> Position paper — v0.2</div>
+        <h1 class="h1-dark">A detection score is an opinion.<br>A layered case is evidence.</h1>
+        <p class="hero-sub hero-sub-dark">Viskopic replaces the single opaque AI-detection score with three defensible metrics and a live viva — so compliance officers get an argument they can actually stand behind, not a number they have to take on faith.</p>
+        <div class="byline byline-dark">
+          <span><strong>Founders</strong> — Soo C.B., Nguyen H., Surisetty S.K.</span>
+          <span class="dot"></span>
+          <span>Building since 2026</span>
+          <span class="dot"></span>
+          <span>Bristol, UK</span>
         </div>
-        <div class="hero-mark" aria-hidden="true">
-          <img class="logo-mark-hero" src="data:image/png;base64,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8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFCG8AYAQBnCGwAAZQhvAACUIbwBAFDm/wc7/TPyGWybvAAAAABJRU5ErkJggg==" alt="">
+        <div class="hero-cta">
+          <a href="#contact" class="btn btn-primary">Get in touch</a>
+          <a href="#approach" class="btn btn-secondary btn-secondary-dark">See the framework</a>
         </div>
       </div>
+      <div class="hero-scroll" aria-hidden="true"><span></span></div>
     </section>
 
+    <!-- ============ 01 PROBLEM ============ -->
     <section id="problem">
       <div class="col">
-        <div class="section-head">
+        <div class="section-head reveal">
           <div class="section-num"><span class="tick"></span> 01 — The Problem</div>
-          <h2>Detection is a losing race. Provenance isn't.</h2>
+          <h2>A score is not a case.</h2>
         </div>
-        <div class="problem-grid" style="grid-template-columns:1fr;">
-          <div>
-            <p>Every AI-detection classifier is trained against a model of AI writing that is already out of date by the time it ships.<sup class="fn">1</sup> As generation models improve, the statistical fingerprints these tools rely on shrink, and false positives fall disproportionately on exactly the writers institutions are trying to protect: non-native speakers, neurodivergent students, and anyone whose natural style resembles what a model has learned to imitate.<sup class="fn">2</sup></p>
-            <p>Meanwhile, the actual question an educator, editor, or hiring manager wants answered is rarely "does this look machine-generated?" It's "can this person show me how they got here?" That's an authorship question, not a detection question, and it needs a different kind of infrastructure: one built at the point of writing, not reconstructed forensically after the fact.</p>
+        <div class="problem-grid">
+          <div class="reveal">
+            <p>Every AI-detection tool ends the same way: a single number, and no way to explain it. A 78% score isn't evidence, it's an opinion the compliance officer can't defend in a hearing, an appeal, or a tribunal. They can't say which sentences moved the number, why the model thinks so, or how confident they should be acting on it.</p>
+            <p>The people asking a university to prove misconduct don't want a probability. They want a case: something built from evidence a non-technical panel can read, question, and stand behind when a student pushes back.</p>
+          </div>
+          <div class="reveal reveal-delay">
+            <div class="pull-card">
+              <div class="pull-mark" aria-hidden="true"></div>
+              <p class="pull-quote">"The detector said 82%. Legal asked what that meant. We didn't have an answer."</p>
+              <p class="pull-attr">— composite of pilot conversations with university compliance staff</p>
+            </div>
           </div>
         </div>
-        <ul class="footnotes">
-          <li>1. Detector accuracy degrades measurably against newer generations of language models, see ongoing evaluations from AI safety and NLP research groups.</li>
-          <li>2. Elevated false-positive rates for non-native English writers have been documented in independent evaluations of commercial AI-text classifiers.</li>
-        </ul>
       </div>
     </section>
 
+    <!-- ============ 02 APPROACH / FRAMEWORK ============ -->
     <section id="approach">
       <div class="col">
-        <div class="section-head">
-          <div class="section-num"><span class="tick"></span> 02 — Our Approach</div>
-          <h2>Infrastructure, not inference.</h2>
+        <div class="section-head reveal">
+          <div class="section-num"><span class="tick"></span> 02 — The Framework</div>
+          <h2>Three scores, not one.</h2>
+          <p class="section-lead">We split the single black-box number into a layered read of the writing, across two domains that feed two different questions later in the process.</p>
         </div>
-        <div class="approach-list">
-          <div class="approach-item">
-            <div class="approach-label">Method A</div>
-            <div>
-              <h3>Process capture</h3>
-              <p>Instead of analysing finished text, we instrument the writing process itself: drafting patterns, revision history, timing, to build a verifiable record of how a piece of writing came to exist.</p>
+
+        <div class="metric-domain reveal">
+          <div class="metric-domain-label">Domain A — Style</div>
+          <div class="metric-grid">
+            <div class="metric-card" style="--metric-color:var(--g1)">
+              <div class="metric-gauge" data-pct="72">
+                <svg viewBox="0 0 120 120"><circle class="gauge-track" cx="60" cy="60" r="52"></circle><circle class="gauge-fill" cx="60" cy="60" r="52"></circle></svg>
+                <span class="gauge-num">72</span>
+              </div>
+              <h3>Consistency</h3>
+              <p class="metric-q">Is the writing style of this author consistent?</p>
+              <p class="metric-d">Measured against that student's own submission history, not a generic population of writers.</p>
+            </div>
+            <div class="metric-card" style="--metric-color:var(--g2)">
+              <div class="metric-gauge" data-pct="41">
+                <svg viewBox="0 0 120 120"><circle class="gauge-track" cx="60" cy="60" r="52"></circle><circle class="gauge-fill" cx="60" cy="60" r="52"></circle></svg>
+                <span class="gauge-num">41</span>
+              </div>
+              <h3>Genericity</h3>
+              <p class="metric-q">Is this author's style considered generic?</p>
+              <p class="metric-d">How closely the voice resembles the flattened, average style that generation models tend to produce.</p>
             </div>
           </div>
-          <div class="approach-item">
-            <div class="approach-label">Method B</div>
-            <div>
-              <h3>Stylometric baselines</h3>
-              <p>We build a longitudinal model of an individual's own writing style, so authorship claims are checked against that person's history, not a generic "AI vs. human" boundary that shifts under every model release.</p>
+        </div>
+
+        <div class="metric-domain reveal">
+          <div class="metric-domain-label">Domain B — Substance</div>
+          <div class="metric-grid metric-grid-single">
+            <div class="metric-card" style="--metric-color:var(--g3)">
+              <div class="metric-gauge" data-pct="58">
+                <svg viewBox="0 0 120 120"><circle class="gauge-track" cx="60" cy="60" r="52"></circle><circle class="gauge-fill" cx="60" cy="60" r="52"></circle></svg>
+                <span class="gauge-num">58</span>
+              </div>
+              <h3>Authenticity</h3>
+              <p class="metric-q">Are the claims, reasoning, and evidence original?</p>
+              <p class="metric-d">Whether the argument in this specific piece, on its specific topic, holds up as this author's own reasoning.</p>
             </div>
           </div>
-          <div class="approach-item">
-            <div class="approach-label">Method C</div>
-            <div>
-              <h3>Portable credentials</h3>
-              <p>Authorship evidence is issued as a portable, verifiable record the writer controls: usable across institutions, platforms and employers, rather than locked inside one vendor's dashboard.</p>
+        </div>
+
+        <p class="approach-foot reveal">Three numbers a compliance officer can point to individually, cite separately, and defend on their own terms.</p>
+      </div>
+    </section>
+
+    <!-- ============ 03 VIVA ============ -->
+    <section id="viva">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <div class="section-num"><span class="tick"></span> 03 — The Viva</div>
+          <h2>When the scores flag, a conversation decides.</h2>
+          <p class="section-lead">Hardcoded thresholds catch the obvious red flags. Everything past that line doesn't get a rerun of the same algorithm, it gets a live interrogation.</p>
+        </div>
+
+        <div class="viva-flow reveal">
+          <svg class="viva-connector" viewBox="0 0 900 40" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="20" y1="20" x2="880" y2="20"></line>
+          </svg>
+          <div class="viva-step">
+            <div class="viva-step-num">01</div>
+            <h3>Threshold flag</h3>
+            <p>A consistency or genericity score crosses a hardcoded line, an obvious red flag worth a closer look.</p>
+          </div>
+          <div class="viva-step" style="--metric-color:var(--g1)">
+            <div class="viva-step-num">02</div>
+            <span class="viva-tag">AI · 1:1</span>
+            <h3>Style Viva</h3>
+            <p>An AI probing system interrogates the student against their own past work in a similar field: <em>"You wrote X in essay Y — why is it different now, in Z?"</em></p>
+          </div>
+          <div class="viva-step" style="--metric-color:var(--g3)">
+            <div class="viva-step-num">03</div>
+            <span class="viva-tag">AI Qs · Human Eval</span>
+            <h3>Reasoning Viva</h3>
+            <p>If style flags further, the AI generates the reasoning questions and a supervisor runs the session live, one-to-one, evaluating the student's answers in real time.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 04 VIVA DEMO ============ -->
+    <section id="viva-demo">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <div class="section-num"><span class="tick"></span> 04 — Inside a Viva</div>
+          <h2>Watch a probe run.</h2>
+          <p class="section-lead">Two transcripts, scripted from how each viva actually runs. Pick one to play it back.</p>
+        </div>
+
+        <div class="demo-shell reveal">
+          <div class="demo-tabs" role="tablist" aria-label="Viva type">
+            <button class="demo-tab is-active" data-target="style" role="tab" aria-selected="true">
+              <span class="demo-tab-dot" style="--dot-color:var(--g1)"></span> Style Viva <span class="demo-tab-sub">AI · 1:1</span>
+            </button>
+            <button class="demo-tab" data-target="reasoning" role="tab" aria-selected="false">
+              <span class="demo-tab-dot" style="--dot-color:var(--g3)"></span> Reasoning Viva <span class="demo-tab-sub">AI Qs · Human Eval</span>
+            </button>
+          </div>
+
+          <div class="demo-window">
+            <div class="demo-window-head">
+              <span class="demo-window-title" id="demoWindowTitle">Style Viva — probing consistency against past submissions</span>
+              <button class="demo-replay" id="demoReplay" aria-label="Replay transcript">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13.5 2.5v3.2h-3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Replay
+              </button>
+            </div>
+            <div class="demo-thread" id="demoThread" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 05 MOAT ============ -->
+    <section id="moat">
+      <div class="col">
+        <div class="section-head reveal">
+          <div class="section-num"><span class="tick"></span> 05 — Why It Compounds</div>
+          <h2>The framework becomes the record.</h2>
+        </div>
+        <div class="problem-grid">
+          <div class="reveal">
+            <p>Every case a university runs through Viskopic adds to a framework their own compliance officers actually understand, one built from that university's scores and viva outcomes, and cited in hearings and appeals as it accumulates.</p>
+            <p>That's the part a competitor can't hand over on day one. It takes a compliance office months to learn how to read and interpret a new framework in the first place, and every case decided on ours becomes a precedent their own staff already trust.</p>
+          </div>
+          <div class="reveal reveal-delay">
+            <div class="cost-list">
+              <div class="cost-item">
+                <span class="cost-mark"></span>
+                <div><h4>Rebuild the framework</h4><p>Months of relearning what each score means and how it's been interpreted case by case.</p></div>
+              </div>
+              <div class="cost-item">
+                <span class="cost-mark"></span>
+                <div><h4>Retrain compliance staff</h4><p>Every officer who has learned to read our scores starts over on someone else's.</p></div>
+              </div>
+              <div class="cost-item">
+                <span class="cost-mark"></span>
+                <div><h4>Risk open cases</h4><p>Switching mid-stream can undercut the basis for cases still open or under appeal.</p></div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
+    <!-- ============ 06 ROADMAP ============ -->
     <section id="roadmap">
       <div class="wrap">
-        <div class="section-head">
-          <div class="section-num"><span class="tick"></span> 03 — Roadmap</div>
+        <div class="section-head reveal">
+          <div class="section-num"><span class="tick"></span> 06 — Roadmap</div>
           <h2>Where this goes from here</h2>
         </div>
         <div class="phases">
-          <div class="phase">
+          <div class="phase reveal">
             <span class="phase-tag">Phase I</span>
-            <h3>Baseline &amp; pilot</h3>
-            <p>Ship a stylometric baseline tool and run it with a small number of pilot institutions to validate the core method against real writing samples.</p>
+            <h3>Metric engine &amp; pilot</h3>
+            <p>Ship the consistency, genericity and authenticity scoring engine and run it with a small number of pilot institutions against real submissions.</p>
             <div class="phase-status">In progress</div>
           </div>
-          <div class="phase">
+          <div class="phase reveal reveal-delay">
             <span class="phase-tag">Phase II</span>
-            <h3>Process capture</h3>
-            <p>Build the writing-process instrumentation layer, the drafting and revision record that underwrites stronger authorship claims than text analysis alone.</p>
+            <h3>Viva infrastructure</h3>
+            <p>Build the Style Viva and Reasoning Viva flow, threshold triggers, the AI probing dialogue, and the live hand-off to a human supervisor.</p>
             <div class="phase-status">Next</div>
           </div>
-          <div class="phase">
+          <div class="phase reveal reveal-delay2">
             <span class="phase-tag">Phase III</span>
-            <h3>Credential API</h3>
-            <p>Open an API for issuing and verifying portable authorship credentials, so institutions and platforms can check provenance without owning the infrastructure themselves.</p>
+            <h3>Compliance framework API</h3>
+            <p>Open an API that lets an institution's own framework, its scores, thresholds and precedent, be queried, cited, and carried forward.</p>
             <div class="phase-status">Future work</div>
           </div>
         </div>
       </div>
     </section>
 
+    <!-- ============ 07 TEAM ============ -->
     <section id="team">
       <div class="col">
-        <div class="section-head">
-          <div class="section-num"><span class="tick"></span> 04 — Team</div>
+        <div class="section-head reveal">
+          <div class="section-num"><span class="tick"></span> 07 — Team</div>
           <h2>Who's building this</h2>
         </div>
         <div class="team-list">
-          <div class="team-item">
-            <div>
-              <div class="team-name">Sathvik Sai Krishna Surisetty</div>
-              <span class="team-role">Product Founder</span>
-            </div>
-            <p class="team-bio">AI Engineer & Data Science, Lloyds Banking Group. BSc Data Science, University of Bristol</p>
-          </div>
-          <div class="team-item">
+          <div class="team-item reveal">
             <div>
               <div class="team-name">Christopher Bintang Soo</div>
-              <span class="team-role">Research Founder</span>
+              <span class="team-role">Product &amp; Research</span>
             </div>
-            <p class="team-bio">AI Engineer & Data Analytics, Digibank by DBS. BSc Data Science, University of Bristol</p>
+            <p class="team-bio">AI Engineer &amp; Data Analytics, Digibank by DBS. BSc Data Science, University of Bristol.</p>
           </div>
-          <div class="team-item">
+          <div class="team-item reveal">
             <div>
               <div class="team-name">Hung Nguyen</div>
-              <span class="team-role">Technical Founder</span>
+              <span class="team-role">Data &amp; Engineering</span>
             </div>
-            <p class="team-bio">BSc Mathematics & Computer Science, University of Bristol.</p>
+            <p class="team-bio">BSc Mathematics &amp; Computer Science, University of Bristol.</p>
+          </div>
+          <div class="team-item reveal">
+            <div>
+              <div class="team-name">Sathvik Sai Krishna Surisetty</div>
+              <span class="team-role">Business &amp; Growth</span>
+            </div>
+            <p class="team-bio">AI Engineer &amp; Data Science, Lloyds Banking Group. BSc Data Science, University of Bristol.</p>
           </div>
         </div>
       </div>
     </section>
 
+    <!-- ============ 08 CONTACT ============ -->
     <section id="contact">
       <div class="col">
         <div class="contact-grid">
-          <div class="contact-copy">
-            <div class="section-num"><span class="tick"></span> 05 — Contact</div>
+          <div class="contact-copy reveal">
+            <div class="section-num"><span class="tick"></span> 08 — Contact</div>
             <h2>Let's talk</h2>
             <p>We're pre-seed and talking to early pilot partners and investors who think about this problem the way we do.</p>
             <div class="contact-options">
@@ -186,7 +321,7 @@
               <a href="mailto:chris@viskopic.com" class="contact-option"><span>For pilot partners: chris@viskopic.com</span><span class="arrow">→</span></a>
             </div>
           </div>
-          <form onsubmit="event.preventDefault();">
+          <form onsubmit="event.preventDefault();" class="reveal reveal-delay">
             <div class="field">
               <label for="name">Name</label>
               <input type="text" id="name" required>
@@ -225,6 +360,11 @@
   </footer>
 
 <script>
+  function prefersReducedMotion(){
+    try{ return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch(e){ return false; }
+  }
+
   function toggleMobileNav(){
     var toggle = document.querySelector('.nav-toggle');
     var panel = document.getElementById('mobileNav');
@@ -237,6 +377,357 @@
     panel.classList.remove('open');
     toggle.setAttribute('aria-expanded', 'false');
   }
+
+  /* ---------- Hero signal animation (stands in for a video background) ---------- */
+  (function(){
+    var canvas = document.getElementById('signal');
+    if(!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var reduced = prefersReducedMotion();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w, h;
+
+    function resize(){
+      var rect = canvas.parentElement.getBoundingClientRect();
+      w = rect.width; h = rect.height;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    var waves = [
+      { color: '#C4237A', amp: 0.10, speed: 0.55, freq: 1.6, phase: 0,   yOff: 0.34, width: 3 },
+      { color: '#5B3FD1', amp: 0.13, speed: 0.40, freq: 1.15, phase: 2.1, yOff: 0.52, width: 3 },
+      { color: '#1B9E82', amp: 0.09, speed: 0.62, freq: 1.9, phase: 4.2, yOff: 0.68, width: 3 }
+    ];
+
+    function waveY(wave, nx, t){
+      return h*wave.yOff
+        + Math.sin(nx*Math.PI*2*wave.freq + t*wave.speed + wave.phase) * h*wave.amp
+        + Math.sin(nx*Math.PI*2*wave.freq*2.3 + t*wave.speed*1.7 + wave.phase) * h*wave.amp*0.28;
+    }
+
+    function drawWave(wave, t, opacity){
+      ctx.beginPath();
+      var steps = Math.max(60, Math.floor(w / 8));
+      for(var i=0;i<=steps;i++){
+        var nx = i/steps, x = nx*w;
+        var y = waveY(wave, nx, t);
+        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      }
+      ctx.strokeStyle = wave.color;
+      ctx.globalAlpha = opacity;
+      ctx.lineWidth = wave.width;
+      ctx.shadowColor = wave.color;
+      ctx.shadowBlur = 30;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+    }
+
+    function drawPulses(wave, t){
+      var count = 3;
+      for(var p=0;p<count;p++){
+        var nx = ((t*0.05*wave.speed*3) + p/count + wave.phase*0.02) % 1;
+        if(nx < 0) nx += 1;
+        var x = nx*w, y = waveY(wave, nx, t);
+        var r = 3.4;
+        var grad = ctx.createRadialGradient(x,y,0,x,y,r*6);
+        grad.addColorStop(0, wave.color);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(x,y,r*6,0,Math.PI*2); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(x,y,r*0.55,0,Math.PI*2); ctx.fill();
+      }
+    }
+
+    function drawAmbientGlow(t){
+      var cx = w * (0.32 + Math.sin(t*0.05)*0.05);
+      var cy = h * (0.42 + Math.cos(t*0.04)*0.05);
+      var r = Math.max(w,h) * 0.55;
+      var grad = ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      grad.addColorStop(0, 'rgba(196,35,122,0.10)');
+      grad.addColorStop(0.5, 'rgba(91,63,209,0.06)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0,0,w,h);
+    }
+
+    function drawGrid(t){
+      var spacing = 46;
+      ctx.strokeStyle = 'rgba(239,233,217,0.05)';
+      ctx.lineWidth = 1;
+      var offset = reduced ? 0 : (t*4) % spacing;
+      for(var x = -spacing + offset; x < w+spacing; x += spacing){
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+      }
+      for(var y = 0; y < h+spacing; y += spacing){
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+      }
+    }
+
+    function frame(t){
+      ctx.clearRect(0,0,w,h);
+      drawAmbientGlow(t);
+      drawGrid(t);
+      waves.forEach(function(wv){
+        drawWave(wv, t, 0.78);
+        if(!reduced){ drawPulses(wv, t); }
+      });
+      if(!reduced){ requestAnimationFrame(function(ts){ frame(ts/1000); }); }
+    }
+
+    if(reduced){
+      frame(0);
+    } else {
+      requestAnimationFrame(function(ts){ frame(ts/1000); });
+    }
+  })();
+
+  /* ---------- Scroll reveal ---------- */
+  (function(){
+    var items = document.querySelectorAll('.reveal');
+    if(!('IntersectionObserver' in window) || prefersReducedMotion()){
+      items.forEach(function(el){ el.classList.add('is-visible'); });
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          entry.target.classList.add('is-visible');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+    items.forEach(function(el){ io.observe(el); });
+  })();
+
+  /* ---------- Gauge fill on scroll ---------- */
+  (function(){
+    var gauges = document.querySelectorAll('.metric-gauge');
+    var CIRC = 2 * Math.PI * 52;
+    gauges.forEach(function(g){
+      var fill = g.querySelector('.gauge-fill');
+      fill.style.strokeDasharray = CIRC;
+      fill.style.strokeDashoffset = CIRC;
+    });
+    if(!('IntersectionObserver' in window)){
+      gauges.forEach(animateGauge);
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          animateGauge(entry.target);
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.4 });
+    gauges.forEach(function(g){ io.observe(g); });
+
+    function animateGauge(g){
+      var pct = parseFloat(g.getAttribute('data-pct')) || 0;
+      var fill = g.querySelector('.gauge-fill');
+      var offset = CIRC * (1 - pct/100);
+      requestAnimationFrame(function(){
+        fill.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,.8,.3,1)';
+        fill.style.strokeDashoffset = offset;
+      });
+    }
+  })();
+
+  /* ---------- Viva connector draw-in ---------- */
+  (function(){
+    var line = document.querySelector('.viva-connector line');
+    var wrap = document.querySelector('.viva-flow');
+    if(!line || !wrap) return;
+    var len = 860;
+    line.style.strokeDasharray = len;
+    line.style.strokeDashoffset = len;
+    if(!('IntersectionObserver' in window)){
+      line.style.strokeDashoffset = 0;
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          line.style.transition = 'stroke-dashoffset 1.4s cubic-bezier(.16,.8,.3,1)';
+          line.style.strokeDashoffset = 0;
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.3 });
+    io.observe(wrap);
+  })();
+
+  /* ---------- Hero video: fade in once a real source is loaded ---------- */
+  (function(){
+    var video = document.getElementById('heroVideo');
+    if(!video) return;
+    var source = video.querySelector('source');
+    if(!source || !source.getAttribute('src')) return; // no video supplied yet, canvas stays as the background
+    video.addEventListener('loadeddata', function(){
+      video.classList.add('is-ready');
+    });
+  })();
+
+  /* ---------- Viva demo: scripted chat playback ---------- */
+  (function(){
+    var thread = document.getElementById('demoThread');
+    var tabs = document.querySelectorAll('.demo-tab');
+    var replayBtn = document.getElementById('demoReplay');
+    var titleEl = document.getElementById('demoWindowTitle');
+    var shell = document.querySelector('.demo-shell');
+    if(!thread || !tabs.length) return;
+
+    var reduced = prefersReducedMotion();
+
+    var transcripts = {
+      style: {
+        title: 'Style Viva — probing consistency against past submissions',
+        color: 'var(--g1)',
+        messages: [
+          { from:'ai', name:'AI Probe', text:'Paragraph two: in your essay on colonial trade routes last term, you opened sections with a question. This piece doesn\u2019t. Why the change?' },
+          { from:'student', name:'Student', text:'I guess I just wrote it differently this time. No real reason.' },
+          { from:'ai', name:'AI Probe', text:'This sentence uses \u201cnotwithstanding.\u201d You haven\u2019t used that word across eleven previous submissions. Where did it come from?', flag:'Consistency dip flagged \u2014 lexical outlier' },
+          { from:'student', name:'Student', text:'I read a journal article that used it and thought it fit.' },
+          { from:'ai', name:'AI Probe', text:'Which article \u2014 can you name it?' },
+          { from:'student', name:'Student', text:'I... don\u2019t remember the title.', flag:'Follow-up unresolved \u2014 escalating' },
+          { from:'ai', name:'AI Probe', text:'Understood. That\u2019s enough for the style pass. This case moves to a Reasoning Viva with a supervisor.' }
+        ]
+      },
+      reasoning: {
+        title: 'Reasoning Viva — AI-drafted questions, evaluated live by a supervisor',
+        color: 'var(--g3)',
+        messages: [
+          { from:'ai', name:'Supervisor', note:'question drafted by AI', text:'You argue the 1848 tariff reversal was driven primarily by port lobbying. Walk me through the timeline you used.' },
+          { from:'student', name:'Student', text:'Tariffs went up in 1846, ports lobbied through 1847, and the reversal followed in 1848.' },
+          { from:'ai', name:'Supervisor', note:'question drafted by AI', text:'Your citation for the 1847 lobbying activity \u2014 where\u2019s that sourced?', flag:'Evidence gap flagged \u2014 no citation on file' },
+          { from:'student', name:'Student', text:'It\u2019s in the same source as the tariff numbers, I think.' },
+          { from:'ai', name:'Supervisor', note:'question drafted by AI', text:'That source doesn\u2019t mention lobbying at all. Can you explain the discrepancy?' },
+          { from:'student', name:'Student', text:'I might have combined two sources without tracking it properly.', flag:'Reasoning chain unverified' },
+          { from:'ai', name:'Supervisor', note:'supervisor\u2019s evaluation', text:'That\u2019s what we needed to hear. We\u2019ll note this in the case file.' }
+        ]
+      }
+    };
+
+    var current = 'style';
+    var runToken = 0;
+
+    function clear(){ thread.innerHTML = ''; }
+
+    function typingBubble(from, color){
+      var row = document.createElement('div');
+      row.className = 'demo-row demo-row-' + from;
+      var bubble = document.createElement('div');
+      bubble.className = 'demo-bubble demo-typing';
+      if(from === 'ai'){ bubble.style.setProperty('--bubble-color', color); }
+      bubble.innerHTML = '<span></span><span></span><span></span>';
+      row.appendChild(bubble);
+      return row;
+    }
+
+    function messageRow(msg, color){
+      var row = document.createElement('div');
+      row.className = 'demo-row demo-row-' + msg.from;
+      var col = document.createElement('div');
+      col.className = 'demo-col';
+      var bubble = document.createElement('div');
+      bubble.className = 'demo-bubble';
+      if(msg.from === 'ai'){ bubble.style.setProperty('--bubble-color', color); }
+      var name = document.createElement('div');
+      name.className = 'demo-bubble-name';
+      name.textContent = msg.name + (msg.note ? ' \u00b7 ' + msg.note : '');
+      var text = document.createElement('div');
+      text.textContent = msg.text;
+      bubble.appendChild(name);
+      bubble.appendChild(text);
+      col.appendChild(bubble);
+      if(msg.flag){
+        var flag = document.createElement('div');
+        flag.className = 'demo-flag';
+        flag.style.setProperty('--bubble-color', color);
+        flag.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6v3.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.9" fill="currentColor"/></svg><span>' + msg.flag + '</span>';
+        col.appendChild(flag);
+      }
+      row.appendChild(col);
+      return row;
+    }
+
+    function play(key){
+      var script = transcripts[key];
+      if(!script) return;
+      runToken++;
+      var token = runToken;
+      clear();
+      titleEl.textContent = script.title;
+
+      if(reduced){
+        script.messages.forEach(function(msg){
+          thread.appendChild(messageRow(msg, script.color));
+        });
+        thread.scrollTop = thread.scrollHeight;
+        return;
+      }
+
+      var i = 0;
+      function step(){
+        if(token !== runToken) return; // superseded by a tab switch / replay
+        if(i >= script.messages.length){ return; }
+        var msg = script.messages[i];
+        var typing = typingBubble(msg.from, script.color);
+        thread.appendChild(typing);
+        thread.scrollTop = thread.scrollHeight;
+        var typeDelay = Math.min(1500, 500 + msg.text.length * 12);
+        setTimeout(function(){
+          if(token !== runToken) return;
+          thread.removeChild(typing);
+          var row = messageRow(msg, script.color);
+          thread.appendChild(row);
+          thread.scrollTop = thread.scrollHeight;
+          i++;
+          setTimeout(step, msg.flag ? 900 : 420);
+        }, typeDelay);
+      }
+      step();
+    }
+
+    tabs.forEach(function(tab){
+      tab.addEventListener('click', function(){
+        if(tab.classList.contains('is-active')) return;
+        tabs.forEach(function(t){ t.classList.remove('is-active'); t.setAttribute('aria-selected','false'); });
+        tab.classList.add('is-active');
+        tab.setAttribute('aria-selected','true');
+        current = tab.getAttribute('data-target');
+        play(current);
+      });
+    });
+
+    if(replayBtn){
+      replayBtn.addEventListener('click', function(){ play(current); });
+    }
+
+    var started = false;
+    if(shell && 'IntersectionObserver' in window){
+      var io2 = new IntersectionObserver(function(entries){
+        entries.forEach(function(entry){
+          if(entry.isIntersecting && !started){
+            started = true;
+            play(current);
+            io2.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.35 });
+      io2.observe(shell);
+    } else {
+      play(current);
+    }
+  })();
 </script>
 </body>
 </html>
