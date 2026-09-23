@@ -1,734 +1,255 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Viskopic: Authorship Infrastructure</title>
-<link rel="icon" href="logo_favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="style.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Viskopic is building authorship evidence infrastructure for universities: layered analysis, structured review, and auditable case records.">
+  <meta name="theme-color" content="#101827">
+  <title>Viskopic | Authorship evidence for higher education</title>
+  <script>document.documentElement.classList.add('js');</script>
+  <link rel="icon" href="logo_favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="masthead">
-    <div class="masthead-top">
-      <a href="#" class="brand"><img class="wordmark-lockup" src="viskopic-wordmark.png" alt="Viskopic"></a>
-      <nav>
-        <a href="#problem">Problem</a>
-        <a href="#approach">Approach</a>
-        <a href="#roadmap">Roadmap</a>
-        <a href="#team">Team</a>
-        <a href="#contact">Contact</a>
-      </nav>
-      <button class="nav-toggle" aria-label="Menu" aria-expanded="false" aria-controls="mobileNav" onclick="toggleMobileNav()">
-        <span></span><span></span><span></span>
-      </button>
-    </div>
-    <div class="masthead-strip">
-      <span>Authorship Infrastructure</span>
-      <span>Working Paper — Pre-Seed, 2026</span>
-    </div>
-    <nav class="mobile-nav" id="mobileNav">
-      <a href="#problem" onclick="closeMobileNav()">Problem</a>
-      <a href="#approach" onclick="closeMobileNav()">Approach</a>
-      <a href="#roadmap" onclick="closeMobileNav()">Roadmap</a>
-      <a href="#team" onclick="closeMobileNav()">Team</a>
-      <a href="#contact" onclick="closeMobileNav()">Contact</a>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" id="top">
+    <a class="brand" href="#top" aria-label="Viskopic home">
+      <img src="viskopic-wordmark.png" alt="Viskopic">
+    </a>
+    <nav class="desktop-nav" aria-label="Primary navigation">
+      <a href="#platform">Platform</a>
+      <a href="#principles">Principles</a>
+      <a href="#research">Research</a>
+      <a href="#company">Company</a>
+    </nav>
+    <a class="header-cta" href="#contact">Discuss a pilot</a>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-nav" aria-label="Open navigation">
+      <span></span><span></span>
+    </button>
+    <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation">
+      <a href="#platform">Platform</a>
+      <a href="#principles">Principles</a>
+      <a href="#research">Research</a>
+      <a href="#company">Company</a>
+      <a href="#contact">Discuss a pilot</a>
     </nav>
   </header>
 
-  <main>
-    <!-- ============ HERO ============ -->
-    <section class="hero" id="hero">
-      <canvas id="signal" aria-hidden="true"></canvas>
-      <!--
-        Drop a real video in when you have one: set the <source src="..."> below.
-        Best fit for the brief: a camera slowly pushing in on printed text / a
-        physical book from a couple of different angles, muted, looping.
-        Until a src is set, the canvas signal animation above stays visible as
-        the background — the video fades in on top automatically once it loads.
-      -->
-      <video id="heroVideo" class="hero-video" autoplay muted loop playsinline aria-hidden="true">
-        <source src="" type="video/mp4">
-      </video>
-      <div class="hero-vignette" aria-hidden="true"></div>
-      <div class="hero-inner">
-        <div class="eyebrow eyebrow-dark"><span class="tick"></span> Position paper — v0.2</div>
-        <h1 class="h1-dark">A detection score is an opinion.<br>A layered case is evidence.</h1>
-        <p class="hero-sub hero-sub-dark">Viskopic replaces the single opaque AI-detection score with three defensible metrics and a live viva — so compliance officers get an argument they can actually stand behind, not a number they have to take on faith.</p>
-        <div class="byline byline-dark">
-          <span><strong>Founders</strong> — Soo C.B., Nguyen H., Surisetty S.K.</span>
-          <span class="dot"></span>
-          <span>Building since 2026</span>
-          <span class="dot"></span>
-          <span>Bristol, UK</span>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-scene" aria-hidden="true">
+        <div class="document-sheet document-sheet-back">
+          <span class="document-rule short"></span><span class="document-rule"></span>
+          <span class="document-rule"></span><span class="document-rule medium"></span>
         </div>
-        <div class="hero-cta">
-          <a href="#contact" class="btn btn-primary">Get in touch</a>
-          <a href="#approach" class="btn btn-secondary btn-secondary-dark">See the framework</a>
+        <div class="document-sheet document-sheet-front">
+          <div class="document-meta"><span>CASE 024</span><span>UNDER REVIEW</span></div>
+          <span class="document-rule title"></span><span class="document-rule medium"></span>
+          <span class="document-rule"></span><span class="document-rule flagged"></span>
+          <span class="document-rule"></span><span class="document-rule short"></span>
+          <div class="evidence-note note-one"><span>01</span> Style variance</div>
+          <div class="evidence-note note-two"><span>02</span> Source reasoning</div>
+          <div class="review-stamp">Human review<br>required</div>
         </div>
+        <div class="scene-axis scene-axis-x"></div>
+        <div class="scene-axis scene-axis-y"></div>
       </div>
-      <div class="hero-scroll" aria-hidden="true"><span></span></div>
-    </section>
 
-    <!-- ============ 01 PROBLEM ============ -->
-    <section id="problem">
-      <div class="col">
-        <div class="section-head reveal">
-          <div class="section-num"><span class="tick"></span> 01 — The Problem</div>
-          <h2>A score is not a case.</h2>
+      <div class="hero-content">
+        <p class="kicker">Authorship evidence infrastructure</p>
+        <h1 id="hero-title">Evidence for authorship decisions that deserve scrutiny.</h1>
+        <p class="hero-copy">Viskopic is building a layered evidence and review system for higher education. We help institutions examine how a text was produced without reducing a consequential decision to one opaque score.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#contact">Discuss an institutional pilot</a>
+          <a class="text-link" href="#platform">Explore the approach <span aria-hidden="true">&#8595;</span></a>
         </div>
-        <div class="problem-grid">
-          <div class="reveal">
-            <p>Every AI-detection tool ends the same way: a single number, and no way to explain it. A 78% score isn't evidence, it's an opinion the compliance officer can't defend in a hearing, an appeal, or a tribunal. They can't say which sentences moved the number, why the model thinks so, or how confident they should be acting on it.</p>
-            <p>The people asking a university to prove misconduct don't want a probability. They want a case: something built from evidence a non-technical panel can read, question, and stand behind when a student pushes back.</p>
-          </div>
-          <div class="reveal reveal-delay">
-            <div class="pull-card">
-              <div class="pull-mark" aria-hidden="true"></div>
-              <p class="pull-quote">"The detector said 82%. Legal asked what that meant. We didn't have an answer."</p>
-              <p class="pull-attr">— composite of pilot conversations with university compliance staff</p>
-            </div>
-          </div>
-        </div>
+        <p class="hero-note"><span></span> Pre-seed research and product development &middot; Bristol, UK</p>
       </div>
     </section>
 
-    <!-- ============ 02 APPROACH / FRAMEWORK ============ -->
-    <section id="approach">
-      <div class="col">
-        <div class="section-head reveal">
-          <div class="section-num"><span class="tick"></span> 02 — The Framework</div>
-          <h2>Three scores, not one.</h2>
-          <p class="section-lead">We split the single black-box number into a layered read of the writing, across two domains that feed two different questions later in the process.</p>
-        </div>
+    <section class="context-band" aria-label="Viskopic position">
+      <p>For academic integrity teams, compliance leaders, and institutions preparing for an era of mixed human and machine authorship.</p>
+    </section>
 
-        <div class="metric-domain reveal">
-          <div class="metric-domain-label">Domain A — Style</div>
-          <div class="metric-grid">
-            <div class="metric-card" style="--metric-color:var(--g1)">
-              <div class="metric-gauge" data-pct="72">
-                <svg viewBox="0 0 120 120"><circle class="gauge-track" cx="60" cy="60" r="52"></circle><circle class="gauge-fill" cx="60" cy="60" r="52"></circle></svg>
-                <span class="gauge-num">72</span>
-              </div>
-              <h3>Consistency</h3>
-              <p class="metric-q">Is the writing style of this author consistent?</p>
-              <p class="metric-d">Measured against that student's own submission history, not a generic population of writers.</p>
-            </div>
-            <div class="metric-card" style="--metric-color:var(--g2)">
-              <div class="metric-gauge" data-pct="41">
-                <svg viewBox="0 0 120 120"><circle class="gauge-track" cx="60" cy="60" r="52"></circle><circle class="gauge-fill" cx="60" cy="60" r="52"></circle></svg>
-                <span class="gauge-num">41</span>
-              </div>
-              <h3>Genericity</h3>
-              <p class="metric-q">Is this author's style considered generic?</p>
-              <p class="metric-d">How closely the voice resembles the flattened, average style that generation models tend to produce.</p>
-            </div>
+    <section class="section problem" id="platform">
+      <div class="section-label reveal">01 &nbsp; Institutional problem</div>
+      <div class="section-intro reveal">
+        <h2>A probability cannot carry the weight of a decision.</h2>
+        <p>Academic integrity cases affect students, staff, and institutions. Yet many detection products collapse a complex question into a percentage that is difficult to interpret, challenge, or defend.</p>
+      </div>
+      <div class="problem-comparison reveal">
+        <article class="comparison-side comparison-old">
+          <p class="comparison-label">The single-score model</p>
+          <div class="score-display"><span>?</span><strong>78%</strong></div>
+          <ul>
+            <li>Unclear basis for the result</li>
+            <li>Weak context for an appeal</li>
+            <li>Pressure to treat probability as proof</li>
+          </ul>
+        </article>
+        <div class="comparison-divider" aria-hidden="true"><span>&rarr;</span></div>
+        <article class="comparison-side comparison-new">
+          <p class="comparison-label">The Viskopic approach</p>
+          <div class="evidence-layers">
+            <span>Authorship context</span><span>Textual indicators</span>
+            <span>Reasoning review</span><span>Human decision record</span>
           </div>
-        </div>
-
-        <div class="metric-domain reveal">
-          <div class="metric-domain-label">Domain B — Substance</div>
-          <div class="metric-grid metric-grid-single">
-            <div class="metric-card" style="--metric-color:var(--g3)">
-              <div class="metric-gauge" data-pct="58">
-                <svg viewBox="0 0 120 120"><circle class="gauge-track" cx="60" cy="60" r="52"></circle><circle class="gauge-fill" cx="60" cy="60" r="52"></circle></svg>
-                <span class="gauge-num">58</span>
-              </div>
-              <h3>Authenticity</h3>
-              <p class="metric-q">Are the claims, reasoning, and evidence original?</p>
-              <p class="metric-d">Whether the argument in this specific piece, on its specific topic, holds up as this author's own reasoning.</p>
-            </div>
-          </div>
-        </div>
-
-        <p class="approach-foot reveal">Three numbers a compliance officer can point to individually, cite separately, and defend on their own terms.</p>
+          <p class="comparison-summary">A structured body of evidence a reviewer can inspect, question, and document.</p>
+        </article>
       </div>
     </section>
 
-    <!-- ============ 03 VIVA ============ -->
-    <section id="viva">
-      <div class="wrap">
-        <div class="section-head reveal">
-          <div class="section-num"><span class="tick"></span> 03 — The Viva</div>
-          <h2>When the scores flag, a conversation decides.</h2>
-          <p class="section-lead">Hardcoded thresholds catch the obvious red flags. Everything past that line doesn't get a rerun of the same algorithm, it gets a live interrogation.</p>
-        </div>
+    <section class="section workflow" aria-labelledby="workflow-title">
+      <div class="section-label reveal">02 &nbsp; Review workflow</div>
+      <div class="section-intro reveal">
+        <h2 id="workflow-title">From submitted text to a reviewable case.</h2>
+        <p>Viskopic is designed as decision support for institutional teams. Analysis informs the process; accountable people remain responsible for the outcome.</p>
+      </div>
+      <ol class="workflow-list">
+        <li class="reveal">
+          <div class="step-number">01</div>
+          <div class="step-copy"><h3>Ingest with context</h3><p>Collect the submitted text and the permitted comparison material needed for an institution's chosen review policy.</p></div>
+          <div class="step-output">Submission record</div>
+        </li>
+        <li class="reveal">
+          <div class="step-number">02</div>
+          <div class="step-copy"><h3>Build layered evidence</h3><p>Examine authorship consistency, genericity, and the substance of the reasoning as distinct signals rather than one verdict.</p></div>
+          <div class="step-output">Evidence profile</div>
+        </li>
+        <li class="reveal">
+          <div class="step-number">03</div>
+          <div class="step-copy"><h3>Review through dialogue</h3><p>Where closer scrutiny is warranted, use targeted questions to help a trained reviewer test understanding and provenance.</p></div>
+          <div class="step-output">Structured viva</div>
+        </li>
+        <li class="reveal">
+          <div class="step-number">04</div>
+          <div class="step-copy"><h3>Record the decision</h3><p>Preserve the evidence considered, reviewer rationale, and outcome in a case record suitable for governance and appeal.</p></div>
+          <div class="step-output">Auditable case</div>
+        </li>
+      </ol>
+    </section>
 
-        <div class="viva-flow reveal">
-          <svg class="viva-connector" viewBox="0 0 900 40" preserveAspectRatio="none" aria-hidden="true">
-            <line x1="20" y1="20" x2="880" y2="20"></line>
-          </svg>
-          <div class="viva-step">
-            <div class="viva-step-num">01</div>
-            <h3>Threshold flag</h3>
-            <p>A consistency or genericity score crosses a hardcoded line, an obvious red flag worth a closer look.</p>
-          </div>
-          <div class="viva-step" style="--metric-color:var(--g1)">
-            <div class="viva-step-num">02</div>
-            <span class="viva-tag">AI · 1:1</span>
-            <h3>Style Viva</h3>
-            <p>An AI probing system interrogates the student against their own past work in a similar field: <em>"You wrote X in essay Y — why is it different now, in Z?"</em></p>
-          </div>
-          <div class="viva-step" style="--metric-color:var(--g3)">
-            <div class="viva-step-num">03</div>
-            <span class="viva-tag">AI Qs · Human Eval</span>
-            <h3>Reasoning Viva</h3>
-            <p>If style flags further, the AI generates the reasoning questions and a supervisor runs the session live, one-to-one, evaluating the student's answers in real time.</p>
-          </div>
+    <section class="section framework" id="principles">
+      <div class="section-label reveal">03 &nbsp; Evidence framework</div>
+      <div class="framework-grid">
+        <div class="framework-copy reveal">
+          <h2>Separate the questions before interpreting the answer.</h2>
+          <p>Our research direction treats authorship as a set of related but distinct questions. Each layer should be interpretable on its own and assessed in context.</p>
+          <p class="principle-callout"><strong>Core principle</strong> No metric should, by itself, determine misconduct.</p>
+        </div>
+        <div class="metric-list reveal">
+          <article><span class="metric-code">A1</span><div><h3>Consistency</h3><p>How does this text compare with the author's permitted prior writing?</p></div><span class="metric-domain">Style</span></article>
+          <article><span class="metric-code">A2</span><div><h3>Genericity</h3><p>Where does the writing rely on unusually standardised or non-specific patterns?</p></div><span class="metric-domain">Style</span></article>
+          <article><span class="metric-code">B1</span><div><h3>Authenticity</h3><p>Can the author account for the claims, sources, and reasoning in the work?</p></div><span class="metric-domain">Substance</span></article>
         </div>
       </div>
     </section>
 
-    <!-- ============ 04 VIVA DEMO ============ -->
-    <section id="viva-demo">
-      <div class="wrap">
-        <div class="section-head reveal">
-          <div class="section-num"><span class="tick"></span> 04 — Inside a Viva</div>
-          <h2>Watch a probe run.</h2>
-          <p class="section-lead">Two transcripts, scripted from how each viva actually runs. Pick one to play it back.</p>
-        </div>
-
-        <div class="demo-shell reveal">
-          <div class="demo-tabs" role="tablist" aria-label="Viva type">
-            <button class="demo-tab is-active" data-target="style" role="tab" aria-selected="true">
-              <span class="demo-tab-dot" style="--dot-color:var(--g1)"></span> Style Viva <span class="demo-tab-sub">AI · 1:1</span>
-            </button>
-            <button class="demo-tab" data-target="reasoning" role="tab" aria-selected="false">
-              <span class="demo-tab-dot" style="--dot-color:var(--g3)"></span> Reasoning Viva <span class="demo-tab-sub">AI Qs · Human Eval</span>
-            </button>
-          </div>
-
-          <div class="demo-window">
-            <div class="demo-window-head">
-              <span class="demo-window-title" id="demoWindowTitle">Style Viva — probing consistency against past submissions</span>
-              <button class="demo-replay" id="demoReplay" aria-label="Replay transcript">
-                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13.5 2.5v3.2h-3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Replay
-              </button>
-            </div>
-            <div class="demo-thread" id="demoThread" aria-live="polite"></div>
-          </div>
+    <section class="section governance" id="research">
+      <div class="section-label reveal">04 &nbsp; Research and governance</div>
+      <div class="section-intro reveal">
+        <h2>Designed for institutions that need more than a model output.</h2>
+        <p>The hard problem is not only detecting patterns. It is building a process that can be evaluated scientifically, operated responsibly, and explained to the people affected by it.</p>
+      </div>
+      <div class="governance-grid">
+        <article class="reveal"><span class="governance-index">I</span><h3>Evaluation before assertion</h3><p>Benchmarks should test performance across disciplines, writing conditions, model families, and student populations.</p></article>
+        <article class="reveal"><span class="governance-index">II</span><h3>Human accountability</h3><p>Software can organise evidence and generate questions. Institutions and trained reviewers own the final decision.</p></article>
+        <article class="reveal"><span class="governance-index">III</span><h3>Proportionate data use</h3><p>Collection and retention should be purpose-limited, policy-led, and designed around institutional control.</p></article>
+        <article class="reveal"><span class="governance-index">IV</span><h3>Contestable outcomes</h3><p>Affected people should be able to understand what evidence mattered and how it informed the review.</p></article>
+      </div>
+      <div class="research-status reveal">
+        <div><p class="status-label">Current programme</p><h3>Building the evidence pipeline and institutional web application.</h3></div>
+        <div class="status-items">
+          <span><i></i> Data collection and storage</span><span><i></i> Authorship analysis pipeline</span>
+          <span><i></i> Reviewer case workflow</span><span><i></i> Pilot evaluation design</span>
         </div>
       </div>
     </section>
 
-    <!-- ============ 05 MOAT ============ -->
-    <section id="moat">
-      <div class="col">
-        <div class="section-head reveal">
-          <div class="section-num"><span class="tick"></span> 05 — Why It Compounds</div>
-          <h2>The framework becomes the record.</h2>
-        </div>
-        <div class="problem-grid">
-          <div class="reveal">
-            <p>Every case a university runs through Viskopic adds to a framework their own compliance officers actually understand, one built from that university's scores and viva outcomes, and cited in hearings and appeals as it accumulates.</p>
-            <p>That's the part a competitor can't hand over on day one. It takes a compliance office months to learn how to read and interpret a new framework in the first place, and every case decided on ours becomes a precedent their own staff already trust.</p>
-          </div>
-          <div class="reveal reveal-delay">
-            <div class="cost-list">
-              <div class="cost-item">
-                <span class="cost-mark"></span>
-                <div><h4>Rebuild the framework</h4><p>Months of relearning what each score means and how it's been interpreted case by case.</p></div>
-              </div>
-              <div class="cost-item">
-                <span class="cost-mark"></span>
-                <div><h4>Retrain compliance staff</h4><p>Every officer who has learned to read our scores starts over on someone else's.</p></div>
-              </div>
-              <div class="cost-item">
-                <span class="cost-mark"></span>
-                <div><h4>Risk open cases</h4><p>Switching mid-stream can undercut the basis for cases still open or under appeal.</p></div>
-              </div>
-            </div>
-          </div>
-        </div>
+    <section class="section company" id="company">
+      <div class="section-label reveal">05 &nbsp; Company</div>
+      <div class="section-intro reveal">
+        <h2>Research, product, and institutional adoption under one thesis.</h2>
+        <p>Viskopic is an early-stage company founded in Bristol. Our team combines applied AI research, data engineering, product development, and institutional partnership work.</p>
+      </div>
+      <div class="team-grid">
+        <article class="team-member reveal">
+          <div class="member-monogram">SS</div><p class="member-role">Visionary Founder</p>
+          <h3>Sathvik Sai Krishna Surisetty</h3><p>Leads the company thesis, institutional relationships, partnerships, and pathways to adoption.</p>
+          <span>AI Engineering, Lloyds Banking Group<br>BSc Data Science, University of Bristol</span>
+        </article>
+        <article class="team-member reveal">
+          <div class="member-monogram">CS</div><p class="member-role">Research Founder</p>
+          <h3>Christopher Bintang Soo</h3><p>Leads authorship research, model evaluation, benchmarks, and the scientific direction of the platform.</p>
+          <span>MSc Artificial Intelligence<br>BSc Data Science, University of Bristol</span>
+        </article>
+        <article class="team-member reveal">
+          <div class="member-monogram">HN</div><p class="member-role">Technical Founder</p>
+          <h3>Hung Nguyen</h3><p>Leads data pipelines, platform engineering, integrations, infrastructure, security, and reliability.</p>
+          <span>BSc Mathematics &amp; Computer Science<br>University of Bristol</span>
+        </article>
       </div>
     </section>
 
-    <!-- ============ 06 ROADMAP ============ -->
-    <section id="roadmap">
-      <div class="wrap">
-        <div class="section-head reveal">
-          <div class="section-num"><span class="tick"></span> 06 — Roadmap</div>
-          <h2>Where this goes from here</h2>
-        </div>
-        <div class="phases">
-          <div class="phase reveal">
-            <span class="phase-tag">Phase I</span>
-            <h3>Metric engine &amp; pilot</h3>
-            <p>Ship the consistency, genericity and authenticity scoring engine and run it with a small number of pilot institutions against real submissions.</p>
-            <div class="phase-status">In progress</div>
-          </div>
-          <div class="phase reveal reveal-delay">
-            <span class="phase-tag">Phase II</span>
-            <h3>Viva infrastructure</h3>
-            <p>Build the Style Viva and Reasoning Viva flow, threshold triggers, the AI probing dialogue, and the live hand-off to a human supervisor.</p>
-            <div class="phase-status">Next</div>
-          </div>
-          <div class="phase reveal reveal-delay2">
-            <span class="phase-tag">Phase III</span>
-            <h3>Compliance framework API</h3>
-            <p>Open an API that lets an institution's own framework, its scores, thresholds and precedent, be queried, cited, and carried forward.</p>
-            <div class="phase-status">Future work</div>
-          </div>
-        </div>
+    <section class="section momentum" aria-labelledby="momentum-title">
+      <div class="section-label reveal">06 &nbsp; Development pathway</div>
+      <div class="momentum-layout">
+        <div class="reveal"><h2 id="momentum-title">A focused path from research system to institutional infrastructure.</h2></div>
+        <ol class="roadmap reveal">
+          <li class="is-current"><span>Now</span><div><h3>Evidence foundation</h3><p>Data pipelines, metric evaluation, and the first end-to-end reviewer workflow.</p></div></li>
+          <li><span>Next</span><div><h3>Institutional pilots</h3><p>Controlled deployments with partner universities and policy-led evaluation.</p></div></li>
+          <li><span>Then</span><div><h3>Integrated infrastructure</h3><p>Secure integrations with learning, publishing, and document systems.</p></div></li>
+        </ol>
       </div>
     </section>
 
-    <!-- ============ 07 TEAM ============ -->
-    <section id="team">
-      <div class="col">
-        <div class="section-head reveal">
-          <div class="section-num"><span class="tick"></span> 07 — Team</div>
-          <h2>Who's building this</h2>
-        </div>
-        <div class="team-list">
-          <div class="team-item reveal">
-            <div>
-              <div class="team-name">Sathvik Sai Krishna Surisetty</div>
-              <span class="team-role">Business &amp; Growth</span>
-            </div>
-            <p class="team-bio">AI Engineering, Lloyds Banking Group. BSc Data Science, University of Bristol.</p>
-          </div>
-          <div class="team-item reveal">
-            <div>
-              <div class="team-name">Christopher Bintang Soo</div>
-              <span class="team-role">Product &amp; Research</span>
-            </div>
-            <p class="team-bio">MSc AI &amp; BSc Data Science, University of Bristol.</p>
-          </div>
-          <div class="team-item reveal">
-            <div>
-              <div class="team-name">Hung Nguyen</div>
-              <span class="team-role">Data &amp; Engineering</span>
-            </div>
-            <p class="team-bio">BSc Mathematics &amp; Computer Science, University of Bristol.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ 08 CONTACT ============ -->
-    <section id="contact">
-      <div class="col">
-        <div class="contact-grid">
-          <div class="contact-copy reveal">
-            <div class="section-num"><span class="tick"></span> 08 — Contact</div>
-            <h2>Let's talk</h2>
-            <p>We're pre-seed and talking to early pilot partners and investors who think about this problem the way we do.</p>
-            <div class="contact-options">
-              <a href="mailto:sathvik@viskopic.com" class="contact-option"><span>For investors: sathvik@viskopic.com</span><span class="arrow">→</span></a>
-              <a href="mailto:chris@viskopic.com" class="contact-option"><span>For pilot partners: chris@viskopic.com</span><span class="arrow">→</span></a>
-            </div>
-          </div>
-          <form onsubmit="event.preventDefault();" class="reveal reveal-delay">
-            <div class="field">
-              <label for="name">Name</label>
-              <input type="text" id="name" required>
-            </div>
-            <div class="field">
-              <label for="email">Email</label>
-              <input type="email" id="email" required>
-            </div>
-            <div class="field">
-              <label for="message">Message</label>
-              <textarea id="message" required></textarea>
-            </div>
-            <button type="submit" class="submit-btn">Send</button>
-          </form>
+    <section class="contact" id="contact">
+      <div class="contact-inner reveal">
+        <p class="kicker">Start a conversation</p>
+        <h2>Help shape a more defensible approach to authorship.</h2>
+        <p>We are speaking with universities, academic integrity and compliance teams, research collaborators, and investors who share the need for evidence-led review.</p>
+        <div class="contact-paths">
+          <a href="mailto:chris@viskopic.com?subject=Institutional%20pilot%20with%20Viskopic"><span><small>Universities &amp; research partners</small>Discuss a pilot</span><b aria-hidden="true">&#8599;</b></a>
+          <a href="mailto:sathvik@viskopic.com?subject=Investor%20conversation%20with%20Viskopic"><span><small>Investors &amp; strategic partners</small>Meet the founders</span><b aria-hidden="true">&#8599;</b></a>
         </div>
       </div>
     </section>
   </main>
 
   <footer>
-    <div class="wrap">
-      <div class="footer-grid">
-        <div>
-          <div class="footer-mark"><img class="wordmark-lockup-footer" src="viskopic-wordmark.png" alt="Viskopic"></div>
-          <div class="footer-note">Bristol, UK. © 2026.</div>
-        </div>
-        <div class="footer-links">
-          <a href="#problem">Problem</a>
-          <a href="#approach">Approach</a>
-          <a href="#roadmap">Roadmap</a>
-          <a href="#team">Team</a>
-          <a href="#contact">Contact</a>
-        </div>
-      </div>
+    <div class="footer-main">
+      <img src="viskopic-wordmark.png" alt="Viskopic">
+      <p>Authorship evidence infrastructure for higher education.</p>
+      <a href="mailto:chris@viskopic.com">chris@viskopic.com</a>
     </div>
+    <div class="footer-meta"><span>&copy; 2026 Viskopic</span><span>Bristol, United Kingdom</span><a href="#top">Back to top &#8593;</a></div>
   </footer>
 
-<script>
-  function prefersReducedMotion(){
-    try{ return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
-    catch(e){ return false; }
-  }
-
-  function toggleMobileNav(){
-    var toggle = document.querySelector('.nav-toggle');
-    var panel = document.getElementById('mobileNav');
-    var isOpen = panel.classList.toggle('open');
-    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-  }
-  function closeMobileNav(){
-    var toggle = document.querySelector('.nav-toggle');
-    var panel = document.getElementById('mobileNav');
-    panel.classList.remove('open');
-    toggle.setAttribute('aria-expanded', 'false');
-  }
-
-  /* ---------- Hero signal animation (stands in for a video background) ---------- */
-  (function(){
-    var canvas = document.getElementById('signal');
-    if(!canvas) return;
-    var ctx = canvas.getContext('2d');
-    var reduced = prefersReducedMotion();
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var w, h;
-
-    function resize(){
-      var rect = canvas.parentElement.getBoundingClientRect();
-      w = rect.width; h = rect.height;
-      canvas.width = w * dpr; canvas.height = h * dpr;
-      canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    var waves = [
-      { color: '#C4237A', amp: 0.10, speed: 0.55, freq: 1.6, phase: 0,   yOff: 0.34, width: 3 },
-      { color: '#5B3FD1', amp: 0.13, speed: 0.40, freq: 1.15, phase: 2.1, yOff: 0.52, width: 3 },
-      { color: '#1B9E82', amp: 0.09, speed: 0.62, freq: 1.9, phase: 4.2, yOff: 0.68, width: 3 }
-    ];
-
-    function waveY(wave, nx, t){
-      return h*wave.yOff
-        + Math.sin(nx*Math.PI*2*wave.freq + t*wave.speed + wave.phase) * h*wave.amp
-        + Math.sin(nx*Math.PI*2*wave.freq*2.3 + t*wave.speed*1.7 + wave.phase) * h*wave.amp*0.28;
-    }
-
-    function drawWave(wave, t, opacity){
-      ctx.beginPath();
-      var steps = Math.max(60, Math.floor(w / 8));
-      for(var i=0;i<=steps;i++){
-        var nx = i/steps, x = nx*w;
-        var y = waveY(wave, nx, t);
-        if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-      }
-      ctx.strokeStyle = wave.color;
-      ctx.globalAlpha = opacity;
-      ctx.lineWidth = wave.width;
-      ctx.shadowColor = wave.color;
-      ctx.shadowBlur = 30;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = 1;
-    }
-
-    function drawPulses(wave, t){
-      var count = 3;
-      for(var p=0;p<count;p++){
-        var nx = ((t*0.05*wave.speed*3) + p/count + wave.phase*0.02) % 1;
-        if(nx < 0) nx += 1;
-        var x = nx*w, y = waveY(wave, nx, t);
-        var r = 3.4;
-        var grad = ctx.createRadialGradient(x,y,0,x,y,r*6);
-        grad.addColorStop(0, wave.color);
-        grad.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.globalAlpha = 0.9;
-        ctx.fillStyle = grad;
-        ctx.beginPath(); ctx.arc(x,y,r*6,0,Math.PI*2); ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(x,y,r*0.55,0,Math.PI*2); ctx.fill();
-      }
-    }
-
-    function drawAmbientGlow(t){
-      var cx = w * (0.32 + Math.sin(t*0.05)*0.05);
-      var cy = h * (0.42 + Math.cos(t*0.04)*0.05);
-      var r = Math.max(w,h) * 0.55;
-      var grad = ctx.createRadialGradient(cx,cy,0,cx,cy,r);
-      grad.addColorStop(0, 'rgba(196,35,122,0.10)');
-      grad.addColorStop(0.5, 'rgba(91,63,209,0.06)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0,0,w,h);
-    }
-
-    function drawGrid(t){
-      var spacing = 46;
-      ctx.strokeStyle = 'rgba(239,233,217,0.05)';
-      ctx.lineWidth = 1;
-      var offset = reduced ? 0 : (t*4) % spacing;
-      for(var x = -spacing + offset; x < w+spacing; x += spacing){
-        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
-      }
-      for(var y = 0; y < h+spacing; y += spacing){
-        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
-      }
-    }
-
-    function frame(t){
-      ctx.clearRect(0,0,w,h);
-      drawAmbientGlow(t);
-      drawGrid(t);
-      waves.forEach(function(wv){
-        drawWave(wv, t, 0.78);
-        if(!reduced){ drawPulses(wv, t); }
-      });
-      if(!reduced){ requestAnimationFrame(function(ts){ frame(ts/1000); }); }
-    }
-
-    if(reduced){
-      frame(0);
-    } else {
-      requestAnimationFrame(function(ts){ frame(ts/1000); });
-    }
-  })();
-
-  /* ---------- Scroll reveal ---------- */
-  (function(){
-    var items = document.querySelectorAll('.reveal');
-    if(!('IntersectionObserver' in window) || prefersReducedMotion()){
-      items.forEach(function(el){ el.classList.add('is-visible'); });
-      return;
-    }
-    var io = new IntersectionObserver(function(entries){
-      entries.forEach(function(entry){
-        if(entry.isIntersecting){
-          entry.target.classList.add('is-visible');
-          io.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
-    items.forEach(function(el){ io.observe(el); });
-  })();
-
-  /* ---------- Gauge fill on scroll ---------- */
-  (function(){
-    var gauges = document.querySelectorAll('.metric-gauge');
-    var CIRC = 2 * Math.PI * 52;
-    gauges.forEach(function(g){
-      var fill = g.querySelector('.gauge-fill');
-      fill.style.strokeDasharray = CIRC;
-      fill.style.strokeDashoffset = CIRC;
+  <script>
+    const menuToggle = document.querySelector('.menu-toggle');
+    const mobileNav = document.querySelector('.mobile-nav');
+    menuToggle.addEventListener('click', () => {
+      const isOpen = menuToggle.getAttribute('aria-expanded') === 'true';
+      menuToggle.setAttribute('aria-expanded', String(!isOpen));
+      menuToggle.setAttribute('aria-label', isOpen ? 'Open navigation' : 'Close navigation');
+      mobileNav.classList.toggle('is-open', !isOpen);
     });
-    if(!('IntersectionObserver' in window)){
-      gauges.forEach(animateGauge);
-      return;
-    }
-    var io = new IntersectionObserver(function(entries){
-      entries.forEach(function(entry){
-        if(entry.isIntersecting){
-          animateGauge(entry.target);
-          io.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.4 });
-    gauges.forEach(function(g){ io.observe(g); });
-
-    function animateGauge(g){
-      var pct = parseFloat(g.getAttribute('data-pct')) || 0;
-      var fill = g.querySelector('.gauge-fill');
-      var offset = CIRC * (1 - pct/100);
-      requestAnimationFrame(function(){
-        fill.style.transition = 'stroke-dashoffset 1.1s cubic-bezier(.16,.8,.3,1)';
-        fill.style.strokeDashoffset = offset;
-      });
-    }
-  })();
-
-  /* ---------- Viva connector draw-in ---------- */
-  (function(){
-    var line = document.querySelector('.viva-connector line');
-    var wrap = document.querySelector('.viva-flow');
-    if(!line || !wrap) return;
-    var len = 860;
-    line.style.strokeDasharray = len;
-    line.style.strokeDashoffset = len;
-    if(!('IntersectionObserver' in window)){
-      line.style.strokeDashoffset = 0;
-      return;
-    }
-    var io = new IntersectionObserver(function(entries){
-      entries.forEach(function(entry){
-        if(entry.isIntersecting){
-          line.style.transition = 'stroke-dashoffset 1.4s cubic-bezier(.16,.8,.3,1)';
-          line.style.strokeDashoffset = 0;
-          io.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.3 });
-    io.observe(wrap);
-  })();
-
-  /* ---------- Hero video: fade in once a real source is loaded ---------- */
-  (function(){
-    var video = document.getElementById('heroVideo');
-    if(!video) return;
-    var source = video.querySelector('source');
-    if(!source || !source.getAttribute('src')) return; // no video supplied yet, canvas stays as the background
-    video.addEventListener('loadeddata', function(){
-      video.classList.add('is-ready');
-    });
-  })();
-
-  /* ---------- Viva demo: scripted chat playback ---------- */
-  (function(){
-    var thread = document.getElementById('demoThread');
-    var tabs = document.querySelectorAll('.demo-tab');
-    var replayBtn = document.getElementById('demoReplay');
-    var titleEl = document.getElementById('demoWindowTitle');
-    var shell = document.querySelector('.demo-shell');
-    if(!thread || !tabs.length) return;
-
-    var reduced = prefersReducedMotion();
-
-    var transcripts = {
-      style: {
-        title: 'Style Viva — probing consistency against past submissions',
-        color: 'var(--g1)',
-        messages: [
-          { from:'ai', name:'AI Probe', text:'Paragraph two: in your essay on colonial trade routes last term, you opened sections with a question. This piece doesn\u2019t. Why the change?' },
-          { from:'student', name:'Student', text:'I guess I just wrote it differently this time. No real reason.' },
-          { from:'ai', name:'AI Probe', text:'This sentence uses \u201cnotwithstanding.\u201d You haven\u2019t used that word across eleven previous submissions. Where did it come from?', flag:'Consistency dip flagged \u2014 lexical outlier' },
-          { from:'student', name:'Student', text:'I read a journal article that used it and thought it fit.' },
-          { from:'ai', name:'AI Probe', text:'Which article \u2014 can you name it?' },
-          { from:'student', name:'Student', text:'I... don\u2019t remember the title.', flag:'Follow-up unresolved \u2014 escalating' },
-          { from:'ai', name:'AI Probe', text:'Understood. That\u2019s enough for the style pass. This case moves to a Reasoning Viva with a supervisor.' }
-        ]
-      },
-      reasoning: {
-        title: 'Reasoning Viva — AI-drafted questions, evaluated live by a supervisor',
-        color: 'var(--g3)',
-        messages: [
-          { from:'ai', name:'Supervisor', note:'question drafted by AI', text:'You argue the 1848 tariff reversal was driven primarily by port lobbying. Walk me through the timeline you used.' },
-          { from:'student', name:'Student', text:'Tariffs went up in 1846, ports lobbied through 1847, and the reversal followed in 1848.' },
-          { from:'ai', name:'Supervisor', note:'question drafted by AI', text:'Your citation for the 1847 lobbying activity \u2014 where\u2019s that sourced?', flag:'Evidence gap flagged \u2014 no citation on file' },
-          { from:'student', name:'Student', text:'It\u2019s in the same source as the tariff numbers, I think.' },
-          { from:'ai', name:'Supervisor', note:'question drafted by AI', text:'That source doesn\u2019t mention lobbying at all. Can you explain the discrepancy?' },
-          { from:'student', name:'Student', text:'I might have combined two sources without tracking it properly.', flag:'Reasoning chain unverified' },
-          { from:'ai', name:'Supervisor', note:'supervisor\u2019s evaluation', text:'That\u2019s what we needed to hear. We\u2019ll note this in the case file.' }
-        ]
-      }
-    };
-
-    var current = 'style';
-    var runToken = 0;
-
-    function clear(){ thread.innerHTML = ''; }
-
-    function typingBubble(from, color){
-      var row = document.createElement('div');
-      row.className = 'demo-row demo-row-' + from;
-      var bubble = document.createElement('div');
-      bubble.className = 'demo-bubble demo-typing';
-      if(from === 'ai'){ bubble.style.setProperty('--bubble-color', color); }
-      bubble.innerHTML = '<span></span><span></span><span></span>';
-      row.appendChild(bubble);
-      return row;
-    }
-
-    function messageRow(msg, color){
-      var row = document.createElement('div');
-      row.className = 'demo-row demo-row-' + msg.from;
-      var col = document.createElement('div');
-      col.className = 'demo-col';
-      var bubble = document.createElement('div');
-      bubble.className = 'demo-bubble';
-      if(msg.from === 'ai'){ bubble.style.setProperty('--bubble-color', color); }
-      var name = document.createElement('div');
-      name.className = 'demo-bubble-name';
-      name.textContent = msg.name + (msg.note ? ' \u00b7 ' + msg.note : '');
-      var text = document.createElement('div');
-      text.textContent = msg.text;
-      bubble.appendChild(name);
-      bubble.appendChild(text);
-      col.appendChild(bubble);
-      if(msg.flag){
-        var flag = document.createElement('div');
-        flag.className = 'demo-flag';
-        flag.style.setProperty('--bubble-color', color);
-        flag.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1 15 14H1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6v3.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.6" r="0.9" fill="currentColor"/></svg><span>' + msg.flag + '</span>';
-        col.appendChild(flag);
-      }
-      row.appendChild(col);
-      return row;
-    }
-
-    function play(key){
-      var script = transcripts[key];
-      if(!script) return;
-      runToken++;
-      var token = runToken;
-      clear();
-      titleEl.textContent = script.title;
-
-      if(reduced){
-        script.messages.forEach(function(msg){
-          thread.appendChild(messageRow(msg, script.color));
-        });
-        thread.scrollTop = thread.scrollHeight;
-        return;
-      }
-
-      var i = 0;
-      function step(){
-        if(token !== runToken) return; // superseded by a tab switch / replay
-        if(i >= script.messages.length){ return; }
-        var msg = script.messages[i];
-        var typing = typingBubble(msg.from, script.color);
-        thread.appendChild(typing);
-        thread.scrollTop = thread.scrollHeight;
-        var typeDelay = Math.min(1500, 500 + msg.text.length * 12);
-        setTimeout(function(){
-          if(token !== runToken) return;
-          thread.removeChild(typing);
-          var row = messageRow(msg, script.color);
-          thread.appendChild(row);
-          thread.scrollTop = thread.scrollHeight;
-          i++;
-          setTimeout(step, msg.flag ? 900 : 420);
-        }, typeDelay);
-      }
-      step();
-    }
-
-    tabs.forEach(function(tab){
-      tab.addEventListener('click', function(){
-        if(tab.classList.contains('is-active')) return;
-        tabs.forEach(function(t){ t.classList.remove('is-active'); t.setAttribute('aria-selected','false'); });
-        tab.classList.add('is-active');
-        tab.setAttribute('aria-selected','true');
-        current = tab.getAttribute('data-target');
-        play(current);
-      });
-    });
-
-    if(replayBtn){
-      replayBtn.addEventListener('click', function(){ play(current); });
-    }
-
-    var started = false;
-    if(shell && 'IntersectionObserver' in window){
-      var io2 = new IntersectionObserver(function(entries){
-        entries.forEach(function(entry){
-          if(entry.isIntersecting && !started){
-            started = true;
-            play(current);
-            io2.unobserve(entry.target);
-          }
-        });
-      }, { threshold: 0.35 });
-      io2.observe(shell);
-    } else {
-      play(current);
-    }
-  })();
-</script>
+    mobileNav.querySelectorAll('a').forEach((link) => link.addEventListener('click', () => {
+      menuToggle.setAttribute('aria-expanded', 'false');
+      menuToggle.setAttribute('aria-label', 'Open navigation');
+      mobileNav.classList.remove('is-open');
+    }));
+    const revealItems = document.querySelectorAll('.reveal');
+    if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
+        if (entry.isIntersecting) { entry.target.classList.add('is-visible'); observer.unobserve(entry.target); }
+      }), { threshold: 0.12 });
+      revealItems.forEach((item) => observer.observe(item));
+    } else { revealItems.forEach((item) => item.classList.add('is-visible')); }
+  </script>
 </body>
 </html>
