@@ -41,7 +41,6 @@ services:
     plan: 0.5c-512mb
     dockerContext: ./platform
     dockerfilePath: ./platform/apps/api/Dockerfile
-    healthCheckPath: /api/health
     autoDeployTrigger: commit
     envVars:
       - key: PORT
