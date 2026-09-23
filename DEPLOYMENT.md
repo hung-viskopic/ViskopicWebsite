@@ -1,11 +1,9 @@
 # Viskopic demo deployment
 
-This repository deploys four Render services from `render.yaml`:
+This repository deploys two free Render services from `render.yaml`:
 
 - `viskopic-marketing`: public static company website
-- `viskopic-workspace`: public web gateway for the research workspace
-- `viskopic-api`: private NestJS API, reachable only from Render's private network
-- `viskopic-worker`: private Python document-processing worker
+- `viskopic-workspace`: React workspace, NestJS API, and Python document-processing worker in one free web service
 
 PostgreSQL and private document storage are supplied by one Supabase project in Frankfurt. This configuration is for synthetic demonstrations and internal product work. Do not upload identifiable student work until named accounts, tenant isolation, retention controls, and production security review are complete.
 
@@ -25,7 +23,7 @@ Never commit these values or paste them into an issue, pull request, or chat.
 1. In Render, choose **New > Blueprint**.
 2. Select the private `hung-viskopic/ViskopicWebsite` repository and the `main` branch.
 3. Keep the Blueprint path as `render.yaml`.
-4. During creation, Render asks for every variable marked `sync: false`. Enter the same Supabase values for both API and worker where requested.
+4. During creation, Render asks for every variable marked `sync: false`. Enter the Supabase values when requested.
 
 Use these mappings:
 
@@ -35,11 +33,13 @@ Use these mappings:
 | `S3_ENDPOINT` | Direct endpoint ending in `/storage/v1/s3` |
 | `S3_ACCESS_KEY` | Server-side S3 access key ID |
 | `S3_SECRET_KEY` | Server-side S3 secret access key |
-| `DEV_ACCESS_KEY` | A new random key of at least 32 characters; API only |
+| `DEV_ACCESS_KEY` | A new random key of at least 32 characters |
 
-The Blueprint supplies `S3_REGION`, `S3_BUCKET`, service ports, organisation identifier, and private API discovery automatically.
+The Blueprint supplies `S3_REGION`, `S3_BUCKET`, the service port, and organisation identifier automatically.
 
-Wait until all four services are green. Open the temporary `onrender.com` URL for `viskopic-workspace`, enter the new workspace access key, create a synthetic student, and upload a synthetic TXT or DOCX file. Confirm that processing reaches `completed` before changing DNS.
+Wait until both services are green. Open the temporary `onrender.com` URL for `viskopic-workspace`, enter the new workspace access key, create a synthetic student, and upload a synthetic TXT or DOCX file. Confirm that processing reaches `completed` before changing DNS.
+
+The free workspace sleeps after 15 minutes without inbound traffic and can take about a minute to wake. The API and document worker run together, which is suitable for demonstrations but not production isolation or continuous background processing.
 
 ## 3. Connect GoDaddy DNS
 
@@ -57,4 +57,4 @@ DNS changes can take time to propagate. Keep the Render temporary URLs until bot
 
 Pushes to `main` automatically redeploy the affected services. The API applies the additive SQL migrations at startup. Original files go to the private Supabase bucket; extracted text, records, and processing jobs go to Supabase PostgreSQL.
 
-The API is not assigned a public domain. Browser requests to `/api/*` pass through the workspace gateway to the API over Render's private network.
+Browser requests to `/api/*` and the workspace UI are served by the same Render service. Supabase remains the persistent database and object store; no durable data is written to Render's local filesystem.

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { BadRequestException, Body, Controller, Get, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { S3Client, CreateBucketCommand, HeadBucketCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { randomUUID, createHash } from 'node:crypto';
 import { validateDocument } from './validation';
@@ -97,7 +98,8 @@ async function bootstrap() {
       break;
     } catch (error) { if (attempt >= 20) throw error; await new Promise(resolve => setTimeout(resolve, 1500)); }
   }
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  if (process.env.WEB_ROOT) app.useStaticAssets(process.env.WEB_ROOT);
   app.enableShutdownHooks();
   const port = Number(process.env.PORT || 4300);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid TCP port');

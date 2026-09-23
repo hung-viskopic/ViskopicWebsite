@@ -20,27 +20,10 @@ services:
     name: viskopic-workspace
     runtime: docker
     region: frankfurt
-    plan: 0.5c-512mb
+    plan: free
     dockerContext: ./platform
-    dockerfilePath: ./platform/apps/web/Dockerfile
+    dockerfilePath: ./platform/Dockerfile
     healthCheckPath: /api/health
-    autoDeployTrigger: commit
-    envVars:
-      - key: PORT
-        value: 10000
-      - key: API_HOSTPORT
-        fromService:
-          type: pserv
-          name: viskopic-api
-          property: hostport
-
-  - type: pserv
-    name: viskopic-api
-    runtime: docker
-    region: frankfurt
-    plan: 0.5c-512mb
-    dockerContext: ./platform
-    dockerfilePath: ./platform/apps/api/Dockerfile
     autoDeployTrigger: commit
     envVars:
       - key: PORT
@@ -61,25 +44,3 @@ services:
         value: submissions
       - key: DEV_ACCESS_KEY
         sync: false
-
-  - type: worker
-    name: viskopic-worker
-    runtime: docker
-    region: frankfurt
-    plan: 0.5c-512mb
-    dockerContext: ./platform/services/worker
-    dockerfilePath: ./platform/services/worker/Dockerfile
-    autoDeployTrigger: commit
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: S3_ENDPOINT
-        sync: false
-      - key: S3_REGION
-        value: eu-central-1
-      - key: S3_ACCESS_KEY
-        sync: false
-      - key: S3_SECRET_KEY
-        sync: false
-      - key: S3_BUCKET
-        value: submissions
