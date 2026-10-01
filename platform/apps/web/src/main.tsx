@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Archive, ArchiveRestore, CheckCircle2, ChevronRight, Clock3, FileText, Folder, FolderPlus, History, Inbox, LogOut, Pencil, RefreshCw, Search, Trash2, Upload, UserPlus, Users, X } from 'lucide-react';
+import { Archive, ArchiveRestore, CheckCircle2, ChevronRight, Clock3, FileText, Folder, FolderPlus, History, LogOut, Pencil, RefreshCw, Search, Trash2, Upload, UserPlus, Users, X } from 'lucide-react';
 import './style.css';
 
 type Course = { id: string; name: string; archived: boolean; student_count: number };
 type Student = { id: string; course_id: string; reference: string; name: string; archived: boolean; document_count: number };
-type Submission = { id: string; student_id: string | null; filename: string; status: string; word_count: number | null; created_at: string; error: string | null };
+type Submission = { id: string; student_id: string; filename: string; status: string; word_count: number | null; created_at: string; error: string | null };
 type Detail = Submission & { extracted_text: string | null; sha256: string; pipeline_version: string | null; events: { event: string; created_at: string }[] };
 type Event = { id: string; action: string; actor: string; created_at: string };
 type Modal = { kind: 'course'; edit: boolean } | { kind: 'student'; edit: boolean } | { kind: 'delete'; entity: 'course' | 'student'; id: string; name: string } | { kind: 'move'; id: string };
@@ -18,7 +18,6 @@ function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [courseId, setCourseId] = useState<string | null>(null);
   const [studentId, setStudentId] = useState<string | null>(null);
-  const [unassigned, setUnassigned] = useState(false);
   const [items, setItems] = useState<Submission[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -41,7 +40,7 @@ function App() {
   const dialog = useRef<HTMLDialogElement>(null);
   const course = courses.find(c => c.id === courseId);
   const student = students.find(s => s.id === studentId);
-  const documents = unassigned || !!studentId;
+  const documents = !!studentId;
   const archived = course?.archived || student?.archived;
   const selectedStatus = items.find(i => i.id === selected)?.status;
 
@@ -54,8 +53,8 @@ function App() {
     return response.json();
   }
   function json(method: string, body: unknown): RequestInit { return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }; }
-  function navigate(nextCourse: string | null = null, nextStudent: string | null = null, inbox = false) {
-    setCourseId(nextCourse); setStudentId(nextStudent); setUnassigned(inbox); setSelected(null); setDetail(null); setItems([]); setFilter(''); setError(''); setActivityId(null); setActivity(null);
+  function navigate(nextCourse: string | null = null, nextStudent: string | null = null) {
+    setCourseId(nextCourse); setStudentId(nextStudent); setSelected(null); setDetail(null); setItems([]); setFilter(''); setError(''); setActivityId(null); setActivity(null);
     if (nextCourse !== courseId) setStudents([]);
   }
   useEffect(() => {
@@ -64,14 +63,14 @@ function App() {
     async function load() {
       try {
         const opts = { signal: controller.signal };
-        const [cs, ss, ds] = await Promise.all([request('/courses', opts), courseId ? request(`/courses/${courseId}/students`, opts) : [], documents ? request('/submissions?studentId=' + (studentId || 'unassigned'), opts) : []]);
+        const [cs, ss, ds] = await Promise.all([request('/courses', opts), courseId ? request(`/courses/${courseId}/students`, opts) : [], studentId ? request('/submissions?studentId=' + studentId, opts) : []]);
         if (active) { setCourses(cs); setStudents(ss); setItems(ds); }
       } catch (e) { if (active) setError((e as Error).message); }
       finally { if (active) setLoading(false); }
     }
     setLoading(true); void load(); const timer = window.setInterval(load, 3000);
     return () => { active = false; controller.abort(); clearInterval(timer); };
-  }, [key, courseId, studentId, unassigned, revision]);
+  }, [key, courseId, studentId, revision]);
   useEffect(() => {
     if (!key || !studentId) return;
     const controller = new AbortController();
@@ -122,7 +121,8 @@ function App() {
         await request(`/${modal.entity === 'course' ? 'courses' : 'students'}/${modal.id}`, { method: 'DELETE' });
         navigate(modal.entity === 'student' ? courseId : null);
       } else {
-        await request('/submissions/' + modal.id, json('PATCH', { studentId: targetStudent || null })); setSelected(null); setDetail(null);
+        if (!targetStudent) throw new Error('Choose a destination student.');
+        await request('/submissions/' + modal.id, json('PATCH', { studentId: targetStudent })); setSelected(null); setDetail(null);
       }
       setModal(null); setRevision(v => v + 1);
     } catch (e) { setModalError((e as Error).message); }
@@ -130,10 +130,11 @@ function App() {
   }
   async function upload(file?: File) {
     if (!file) return;
+    if (!studentId) { setError('Choose a student record before uploading.'); return; }
     setBusy(true); setError('');
     try {
       const form = new FormData(); form.append('file', file);
-      const result = await request('/submissions' + (studentId ? '?studentId=' + studentId : ''), { method: 'POST', body: form });
+      const result = await request('/submissions?studentId=' + studentId, { method: 'POST', body: form });
       setSelected(result.id); setDetail(null); setRevision(v => v + 1);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); if (input.current) input.current.value = ''; }
@@ -152,9 +153,9 @@ function App() {
   return <>
     <header><div className="brand"><img src="/logo_favicon.svg" alt="" width="32" height="32"/><strong>Viskopic</strong><span>Research workspace</span></div>{icon('Lock workspace', <LogOut size={19}/>, () => { setKey(''); setCourses([]); setStudents([]); navigate(); }, false)}</header>
     <main className="workspace">
-      <nav className="navigation" aria-label="Workspace"><button className={!unassigned ? 'nav-button active' : 'nav-button'} onClick={() => navigate()}><Folder size={17}/>Courses</button><button className={unassigned ? 'nav-button active' : 'nav-button'} onClick={() => navigate(null, null, true)}><Inbox size={17}/>Unassigned</button></nav>
+      <nav className="navigation" aria-label="Workspace"><button className="nav-button active" onClick={() => navigate()}><Folder size={17}/>Courses</button></nav>
       {courseId && <nav className="breadcrumbs" aria-label="Breadcrumb"><button onClick={() => navigate()}>Courses</button><ChevronRight size={14}/><button onClick={() => navigate(courseId)}>{course?.name || 'Course'}</button>{studentId && <><ChevronRight size={14}/><span>{student?.reference || 'Student record'}</span></>}</nav>}
-      <div className="heading"><div><p className="eyebrow">{studentId ? 'STUDENT RECORD' : courseId ? 'COURSE / COHORT' : 'DOCUMENT INTAKE'}</p><h1>{unassigned ? 'Unassigned documents' : studentId ? student?.reference || 'Loading...' : courseId ? course?.name || 'Loading...' : 'Courses'}</h1>{student?.name && <p className="student-name">{student.name}</p>}{archived && <p className="archive-label"><Archive size={14}/>Archived</p>}</div><div className="actions">{icon('Refresh workspace', <RefreshCw size={18}/>, () => { setError(''); setRevision(v => v + 1); })}{courseId && recordActions()}{documents ? <button disabled={busy || !!archived} onClick={() => input.current?.click()}><Upload size={17}/>{busy ? 'Working...' : 'Upload document'}</button> : <button disabled={busy || !!archived} onClick={() => openForm(courseId ? 'student' : 'course')}>{courseId ? <UserPlus size={17}/> : <FolderPlus size={17}/>}{courseId ? 'New student' : 'New course'}</button>}</div></div>
+      <div className="heading"><div><p className="eyebrow">{studentId ? 'STUDENT RECORD' : courseId ? 'COURSE / COHORT' : 'DOCUMENT INTAKE'}</p><h1>{studentId ? student?.reference || 'Loading...' : courseId ? course?.name || 'Loading...' : 'Courses'}</h1>{student?.name && <p className="student-name">{student.name}</p>}{archived && <p className="archive-label"><Archive size={14}/>Archived</p>}</div><div className="actions">{icon('Refresh workspace', <RefreshCw size={18}/>, () => { setError(''); setRevision(v => v + 1); })}{courseId && recordActions()}{documents ? <button disabled={busy || !!archived} onClick={() => input.current?.click()}><Upload size={17}/>{busy ? 'Working...' : 'Upload document'}</button> : <button disabled={busy || !!archived} onClick={() => openForm(courseId ? 'student' : 'course')}>{courseId ? <UserPlus size={17}/> : <FolderPlus size={17}/>}{courseId ? 'New student' : 'New course'}</button>}</div></div>
       <input ref={input} type="file" hidden accept=".pdf,.docx,.txt" onChange={e => void upload(e.target.files?.[0])}/>
       <div className="summary">{documents ? <><span><strong>{items.length}</strong>Documents</span><span><strong>{items.filter(i => i.status === 'completed').length}</strong>Extracted</span><small>PDF, DOCX, TXT / up to 10 MB</small></> : <><span><strong>{courseId ? students.filter(s => !s.archived).length : courses.filter(c => !c.archived).length}</strong>{courseId ? 'Active student records' : 'Active courses'}</span><span><strong>{courseId ? students.reduce((n, s) => n + s.document_count, 0) : courses.reduce((n, c) => n + c.student_count, 0)}</strong>{courseId ? 'Documents' : 'Student records'}</span></>}</div>
       {error && <p role="alert" className="error">{error}</p>}
@@ -171,8 +172,8 @@ function App() {
       {modal?.kind === 'course' && <label>Course or cohort name<input autoFocus required maxLength={160} value={name} onChange={e => setName(e.target.value)}/></label>}
       {modal?.kind === 'student' && <><label>Student reference<input autoFocus required maxLength={160} placeholder="e.g. STU-2026-001" value={reference} onChange={e => setReference(e.target.value)}/></label><label>Display name (optional)<input maxLength={160} value={name} onChange={e => setName(e.target.value)}/></label></>}
       {modal?.kind === 'delete' && <p>Delete <strong>{modal.name}</strong>? Only empty records can be deleted. This cannot be undone.</p>}
-      {modal?.kind === 'move' && <><label>Destination course<select value={targetCourse} onChange={e => setTargetCourse(e.target.value)}><option value="">Unassigned documents</option>{courses.filter(c => !c.archived).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>{targetCourse && <label>Student record<select required value={targetStudent} onChange={e => setTargetStudent(e.target.value)}><option value="">Select student</option>{targets.filter(s => !s.archived).map(s => <option key={s.id} value={s.id}>{s.reference}{s.name ? ' - ' + s.name : ''}</option>)}</select></label>}</>}
-      {modalError && <p className="error" role="alert">{modalError}</p>}<div className="modal-actions"><button type="button" className="secondary" disabled={busy} onClick={() => setModal(null)}>Cancel</button><button className={modal?.kind === 'delete' ? 'danger' : ''} disabled={busy || (modal?.kind === 'move' && !!targetCourse && !targetStudent)}>{busy ? 'Saving...' : modal?.kind === 'delete' ? 'Delete record' : modal?.kind === 'move' ? 'Move document' : 'Save'}</button></div>
+      {modal?.kind === 'move' && <><label>Destination course<select required value={targetCourse} onChange={e => setTargetCourse(e.target.value)}><option value="">Select course</option>{courses.filter(c => !c.archived).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>{targetCourse && <label>Student record<select required value={targetStudent} onChange={e => setTargetStudent(e.target.value)}><option value="">Select student</option>{targets.filter(s => !s.archived).map(s => <option key={s.id} value={s.id}>{s.reference}{s.name ? ' - ' + s.name : ''}</option>)}</select></label>}</>}
+      {modalError && <p className="error" role="alert">{modalError}</p>}<div className="modal-actions"><button type="button" className="secondary" disabled={busy} onClick={() => setModal(null)}>Cancel</button><button className={modal?.kind === 'delete' ? 'danger' : ''} disabled={busy || (modal?.kind === 'move' && (!targetCourse || !targetStudent))}>{busy ? 'Saving...' : modal?.kind === 'delete' ? 'Delete record' : modal?.kind === 'move' ? 'Move document' : 'Save'}</button></div>
     </form></dialog>
   </>;
 }

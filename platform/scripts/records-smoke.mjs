@@ -13,14 +13,17 @@ async function upload(student, status = 201) {
   const form = new FormData();
   // Above the old worker's 1 MiB read boundary; checks the advertised intake limit.
   form.append('file', new Blob(['Synthetic student writing for pipeline verification.\n'.repeat(24000)]), 'synthetic-student-essay.txt');
-  const response = await fetch(base + '/submissions?studentId=' + student, { method: 'POST', headers: { 'x-access-key': key }, body: form });
+  const response = await fetch(base + '/submissions' + (student === undefined ? '' : '?studentId=' + student), { method: 'POST', headers: { 'x-access-key': key }, body: form });
   const result = await response.json();
   assert.equal(response.status, status, JSON.stringify(result));
   return result;
 }
 assert.equal((await fetch(base + '/courses')).status, 401);
 await call('/courses', 'POST', { name: ' ' }, 400);
-const before = await call('/submissions?studentId=unassigned');
+await call('/submissions?studentId=unassigned', 'GET', undefined, 400);
+await upload(undefined, 400);
+await upload('', 400);
+await upload(randomUUID(), 404);
 const course = (await call('/courses')).find(c => c.name === 'Demo cohort (synthetic)') || await call('/courses', 'POST', { name: 'Demo cohort (synthetic)' }, 201);
 const student = (await call(`/courses/${course.id}/students`)).find(s => s.reference === 'DEMO-001') || await call(`/courses/${course.id}/students`, 'POST', { reference: 'DEMO-001', name: '' }, 201);
 await call(`/courses/${course.id}/students`, 'POST', { reference: 'DEMO-001' }, 409);
@@ -49,11 +52,16 @@ assert.equal((await call(`/courses/${course.id}/students`))[0].document_count, 1
 await call(`/students/${student.id}`, 'DELETE', undefined, 409);
 await call(`/courses/${course.id}`, 'DELETE', undefined, 409);
 await call(`/submissions/${doc.id}`, 'PATCH', { studentId: randomUUID() }, 404);
-await call(`/submissions/${doc.id}`, 'PATCH', { studentId: null });
+await call(`/submissions/${doc.id}`, 'PATCH', { studentId: null }, 400);
+await call(`/submissions/${doc.id}`, 'PATCH', { studentId: '' }, 400);
+await call(`/submissions/${doc.id}`, 'PATCH', {}, 400);
+assert.equal((await call(`/submissions/${doc.id}`)).student_id, student.id);
+const destination = await call(`/courses/${course.id}/students`, 'POST', { reference: 'MOVE-' + randomUUID() }, 201);
+await call(`/submissions/${doc.id}`, 'PATCH', { studentId: destination.id });
 assert.equal((await call(`/submissions?studentId=${student.id}`)).length, 0);
-assert.equal((await call('/submissions?studentId=unassigned')).length, before.length + 1);
+assert.equal((await call(`/submissions/${doc.id}`)).student_id, destination.id);
 await call(`/submissions/${doc.id}`, 'PATCH', { studentId: student.id });
-assert.equal((await call('/submissions?studentId=unassigned')).length, before.length);
+await call(`/students/${destination.id}`, 'DELETE');
 await call(`/students/${student.id}`);
 const events = await call(`/activity/${student.id}`);
 for (const action of ['Student record created', 'Student details updated', 'Student archived', 'Student restored', 'Student record viewed']) assert.ok(events.some(e => e.action === action), action);

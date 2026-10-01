@@ -58,3 +58,35 @@ DNS changes can take time to propagate. Keep the Render temporary URLs until bot
 Pushes to `main` automatically redeploy the affected services. The API applies the additive SQL migrations at startup. Original files go to the private Supabase bucket; extracted text, records, and processing jobs go to Supabase PostgreSQL.
 
 Browser requests to `/api/*` and the workspace UI are served by the same Render service. Supabase remains the persistent database and object store; no durable data is written to Render's local filesystem.
+
+## 5. Existing submissions before the NOT NULL migration
+
+New databases need no manual SQL. Existing databases must have a real student assigned to every submission before migration 003 can run. Check with:
+
+```sql
+SELECT id, organisation_id, filename FROM submissions WHERE student_id IS NULL;
+```
+
+For each result, create or identify the actual student and update the matching submission. Replace the UUID placeholders with real IDs; the organisation condition prevents cross-organisation assignment:
+
+```sql
+UPDATE submissions AS d
+SET student_id = s.id, updated_at = now()
+FROM students AS s
+WHERE d.id = 'SUBMISSION_UUID'::uuid
+  AND s.id = 'ACTUAL_STUDENT_UUID'::uuid
+  AND d.organisation_id = s.organisation_id
+  AND d.student_id IS NULL;
+```
+
+Repeat the SELECT until it returns no rows, then deploy/restart the API. Migration 003 preserves documents and sets student_id NOT NULL. It stops with a descriptive error if any ownership is unresolved.
+
+## 6. AWS alternative for temporary testing
+
+AWS accounts created from July 15, 2025 use a Free Plan lasting up to six months or until credits run out. New customers receive $100 in credits and can earn up to $100 more. EC2 is not permanently free. Check account eligibility and available services in AWS Billing before provisioning.
+
+For an eligible account, use a small x86-64 Ubuntu EC2 instance in Frankfurt with Docker, and retain Supabase for the database and files. Build the combined image with `docker build -t viskopic-demo -f platform/Dockerfile platform`, then run it using a protected environment file containing the five secrets plus `PORT=10000`, `S3_REGION=eu-central-1`, `S3_BUCKET=submissions`, and `ORGANISATION_ID=viskopic-demo`. Publish the container only on `127.0.0.1:10000` and serve it through an HTTPS reverse proxy. The combined container replaces the Render web service; the application schema and storage interfaces stay the same.
+
+Render + Supabase is the recommended first demo because the repository already supplies its deployment configuration and Render manages HTTPS. AWS requires VM maintenance and proxy setup, and credits have a time limit.
+
+Provider references: https://render.com/docs/free, https://supabase.com/pricing, https://aws.amazon.com/free/free-tier-faqs/.

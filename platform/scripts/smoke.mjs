@@ -3,15 +3,23 @@ import { createHash } from 'node:crypto';
 
 const base = process.env.API_URL || 'http://127.0.0.1:4300/api';
 const headers = { 'x-access-key': process.env.DEV_ACCESS_KEY || 'local-viskopic-development-key' };
+async function create(path, body) {
+  const response = await fetch(base + path, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal(response.status, 201, await response.clone().text());
+  return response.json();
+}
+const course = await create('/courses', { name: 'Synthetic upload smoke test' });
+const student = await create(`/courses/${course.id}/students`, { reference: 'SMOKE' });
+const uploadUrl = `${base}/submissions?studentId=${student.id}`;
 const text = 'Synthetic integration test.\r\nNo student data is included.';
 const unauthorised = await fetch(`${base}/submissions`);
 assert.equal(unauthorised.status, 401, 'Missing credentials must be rejected');
 const invalid = new FormData();
 invalid.append('file', new Blob(['not a supported document']), 'unsupported.pdf');
-assert.equal((await fetch(`${base}/submissions`, { method: 'POST', headers, body: invalid })).status, 400);
+assert.equal((await fetch(uploadUrl, { method: 'POST', headers, body: invalid })).status, 400);
 const form = new FormData();
 form.append('file', new Blob([text], {type:'text/plain'}), 'synthetic-smoke-test.txt');
-const created = await fetch(`${base}/submissions`, { method:'POST', headers, body:form });
+const created = await fetch(uploadUrl, { method:'POST', headers, body:form });
 assert.equal(created.status, 201, await created.clone().text());
 const { id } = await created.json();
 for (let attempt=0; attempt<30; attempt++) {

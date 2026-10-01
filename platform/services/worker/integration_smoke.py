@@ -10,6 +10,17 @@ from docx import Document
 API_URL = os.getenv('API_URL', 'http://api:4300/api')
 ACCESS_KEY = os.getenv('DEV_ACCESS_KEY', 'local-viskopic-development-key')
 
+def create_record(path, payload):
+    request = urllib.request.Request(
+        API_URL + path, data=json.dumps(payload).encode(), method='POST',
+        headers={'Content-Type': 'application/json', 'x-access-key': ACCESS_KEY},
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.load(response)
+
+course = create_record('/courses', {'name': 'Synthetic DOCX smoke test'})
+student = create_record(f'/courses/{course["id"]}/students', {'reference': 'DOCX-SMOKE'})
+
 document = Document()
 document.add_heading('Synthetic Word submission', level=1)
 document.add_paragraph('This document contains no student data.')
@@ -26,7 +37,7 @@ body = (
     'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n'
 ).encode() + stream.getvalue() + f'\r\n--{boundary}--\r\n'.encode()
 request = urllib.request.Request(
-    f'{API_URL}/submissions',
+    f'{API_URL}/submissions?studentId={student["id"]}',
     data=body,
     method='POST',
     headers={'Content-Type': f'multipart/form-data; boundary={boundary}', 'x-access-key': ACCESS_KEY},

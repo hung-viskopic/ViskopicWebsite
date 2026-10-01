@@ -24,8 +24,8 @@ class HealthController {
   }
 }
 
-function studentId(value: unknown): string | null {
-  if (value === undefined || value === null || value === '') return null;
+function studentId(value: unknown): string {
+  if (value === undefined || value === null || value === '') throw new BadRequestException('Student ID is required. Choose a student record.');
   if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new BadRequestException('Invalid student record ID.');
   return value;
 }
@@ -33,7 +33,7 @@ function studentId(value: unknown): string | null {
 @UseGuards(AccessGuard)
 class SubmissionController {
   @Get('submissions') async list(@Query('studentId') student: string | undefined) {
-    const id = student === 'unassigned' ? null : studentId(student);
+    const id = student === undefined ? null : studentId(student);
     return (await pool.query('SELECT id,student_id,filename,byte_count,status,word_count,error,created_at FROM submissions WHERE organisation_id=$1 AND ($2::boolean OR student_id IS NOT DISTINCT FROM $3::uuid) ORDER BY created_at DESC', [organisation, student === undefined, id])).rows;
   }
   @Get('submissions/:id') async detail(@Param('id', new ParseUUIDPipe()) id: string) {
@@ -44,16 +44,16 @@ class SubmissionController {
     return { ...result.rows[0], events: events.rows };
   }
   @Patch('submissions/:id') async assign(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: Record<string, unknown>) {
-    if (!body || !Object.hasOwn(body, 'studentId')) throw new BadRequestException('Student ID is required; use null for unassigned.');
+    if (!body || !Object.hasOwn(body, 'studentId')) throw new BadRequestException('Student ID is required.');
     const student = studentId(body.studentId);
     return transaction(async db => {
-      const destination = student ? await activeStudent(db, student) : null;
+      const destination = await activeStudent(db, student);
       const old = await db.query('SELECT student_id,filename FROM submissions WHERE id=$1 AND organisation_id=$2', [id, organisation]);
       if (!old.rowCount) throw new NotFoundException();
       await db.query('UPDATE submissions SET student_id=$3,updated_at=now() WHERE id=$1 AND organisation_id=$2', [id, organisation, student]);
-      await audit(db, id, 'submission', destination ? `Assigned to student ${destination.reference}` : 'Moved to unassigned');
+      await audit(db, id, 'submission', `Assigned to student ${destination.reference}`);
       if (old.rows[0].student_id) await audit(db, old.rows[0].student_id, 'student', `Document moved out: ${old.rows[0].filename}`);
-      if (student) await audit(db, student, 'student', `Document assigned: ${old.rows[0].filename}`);
+      await audit(db, student, 'student', `Document assigned: ${old.rows[0].filename}`);
       return { id, student_id: student };
     });
   }
@@ -69,11 +69,11 @@ class SubmissionController {
     await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: file.buffer, ContentType: format.contentType }));
     try {
       await transaction(async client => {
-      if (student) await activeStudent(client, student);
+      await activeStudent(client, student);
       await client.query('INSERT INTO submissions(id,organisation_id,filename,object_key,sha256,byte_count,student_id) VALUES($1,$2,$3,$4,$5,$6,$7)', [id, organisation, file.originalname.slice(0,255), key, createHash('sha256').update(file.buffer).digest('hex'), file.size, student]);
       await client.query('INSERT INTO processing_events(submission_id,event) VALUES($1,$2)', [id, 'Submission received']);
       await audit(client, id, 'submission', 'Document uploaded');
-      if (student) await audit(client, student, 'student', `Document uploaded: ${file.originalname.slice(0,255)}`);
+      await audit(client, student, 'student', `Document uploaded: ${file.originalname.slice(0,255)}`);
       });
     } catch (error) {
       await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })).catch(() => console.error('Orphan cleanup required', id));
@@ -87,6 +87,7 @@ async function bootstrap() {
   await transaction(async db => {
     await db.query(await readFile(resolve(__dirname, '../../../database/001_initial.sql'), 'utf8'));
     await db.query(await readFile(resolve(__dirname, '../../../database/002_records.sql'), 'utf8'));
+    await db.query(await readFile(resolve(__dirname, '../../../database/003_required_student.sql'), 'utf8'));
   });
   for (let attempt=0; ; attempt++) {
     try {
