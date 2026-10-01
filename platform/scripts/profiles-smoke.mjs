@@ -34,6 +34,8 @@ const all = await call(`/submissions?studentId=${student.id}`);
 assert.equal(all.length, 2);
 assert.deepEqual(new Set(all.map(d => d.course_id)), new Set([a.id,b.id]));
 assert.equal((await call(`/submissions?studentId=${student.id}&courseId=${a.id}`)).length, 1);
+assert.deepEqual((await call(`/submissions?studentId=${student.id}&courseId=${a.id}`)).map(d => d.id), [first.id]);
+assert.deepEqual((await call(`/submissions?studentId=${student.id}&courseId=${b.id}`)).map(d => d.id), [second.id]);
 const profile = (await call('/students')).find(s => s.id === student.id);
 assert.equal(profile.document_count, 2);
 assert.equal(profile.course_count, 2);
@@ -47,6 +49,8 @@ await call(`/courses/${a.id}/enrolments/${student.id}`, 'PATCH', { archived: fal
 await call(`/submissions/${first.id}`, 'PATCH', { studentId: student.id, courseId: c.id }, 404);
 await call(`/submissions/${first.id}`, 'PATCH', { studentId: student.id, courseId: b.id });
 assert.equal((await call(`/submissions/${first.id}`)).course_id, b.id);
+assert.equal((await call(`/submissions?studentId=${student.id}&courseId=${a.id}`)).length, 0);
+assert.equal((await call(`/submissions?studentId=${student.id}&courseId=${b.id}`)).length, 3);
 assert.equal((await call(`/submissions/${second.id}`)).student_id, student.id);
 await call(`/courses/${a.id}/enrolments/${student.id}`, 'DELETE');
 assert.equal((await call(`/students/${student.id}/courses`)).length, 1);
