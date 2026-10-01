@@ -32,12 +32,12 @@ function studentId(value: unknown): string {
 @Controller('api')
 @UseGuards(AccessGuard)
 class SubmissionController {
-  @Get('submissions') async list(@Query('studentId') student: string | undefined) {
+  @Get('submissions') async list(@Query('studentId') student: string | undefined, @Query('courseId') course: string | undefined) {
     const id = student === undefined ? null : studentId(student);
-    return (await pool.query('SELECT id,student_id,filename,byte_count,status,word_count,error,created_at FROM submissions WHERE organisation_id=$1 AND ($2::boolean OR student_id IS NOT DISTINCT FROM $3::uuid) ORDER BY created_at DESC', [organisation, student === undefined, id])).rows;
+    return (await pool.query('SELECT d.id,d.student_id,d.course_id,c.name AS course_name,d.filename,d.byte_count,d.status,d.word_count,d.error,d.created_at FROM submissions d JOIN courses c ON c.id=d.course_id AND c.organisation_id=d.organisation_id WHERE d.organisation_id=$1 AND ($2::uuid IS NULL OR d.student_id=$2) AND ($3::uuid IS NULL OR d.course_id=$3) ORDER BY d.created_at DESC', [organisation, id, course === undefined ? null : studentId(course)])).rows;
   }
   @Get('submissions/:id') async detail(@Param('id', new ParseUUIDPipe()) id: string) {
-    const result = await pool.query('SELECT id,student_id,filename,sha256,byte_count,status,attempts,extracted_text,word_count,pipeline_version,error,created_at FROM submissions WHERE id=$1 AND organisation_id=$2', [id, organisation]);
+    const result = await pool.query('SELECT id,student_id,course_id,filename,sha256,byte_count,status,attempts,extracted_text,word_count,pipeline_version,error,created_at FROM submissions WHERE id=$1 AND organisation_id=$2', [id, organisation]);
     if (!result.rowCount) throw new NotFoundException();
     const events = await pool.query('SELECT event,created_at FROM processing_events WHERE submission_id=$1 ORDER BY id', [id]);
     await audit(pool, id, 'submission', 'Document viewed');
@@ -46,21 +46,23 @@ class SubmissionController {
   @Patch('submissions/:id') async assign(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: Record<string, unknown>) {
     if (!body || !Object.hasOwn(body, 'studentId')) throw new BadRequestException('Student ID is required.');
     const student = studentId(body.studentId);
+    const course = studentId(body.courseId);
     return transaction(async db => {
-      const destination = await activeStudent(db, student);
+      const destination = await activeStudent(db, student, course);
       const old = await db.query('SELECT student_id,filename FROM submissions WHERE id=$1 AND organisation_id=$2', [id, organisation]);
       if (!old.rowCount) throw new NotFoundException();
-      await db.query('UPDATE submissions SET student_id=$3,updated_at=now() WHERE id=$1 AND organisation_id=$2', [id, organisation, student]);
+      await db.query('UPDATE submissions SET student_id=$3,course_id=$4,updated_at=now() WHERE id=$1 AND organisation_id=$2', [id, organisation, student, course]);
       await audit(db, id, 'submission', `Assigned to student ${destination.reference}`);
       if (old.rows[0].student_id) await audit(db, old.rows[0].student_id, 'student', `Document moved out: ${old.rows[0].filename}`);
       await audit(db, student, 'student', `Document assigned: ${old.rows[0].filename}`);
-      return { id, student_id: student };
+      return { id, student_id: student, course_id: course };
     });
   }
   @Post('submissions')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 0 } }))
-  async upload(@Query('studentId') studentValue: string | undefined, @UploadedFile() file?: Express.Multer.File) {
+  async upload(@Query('studentId') studentValue: string | undefined, @Query('courseId') courseValue: string | undefined, @UploadedFile() file?: Express.Multer.File) {
     const student = studentId(studentValue);
+    const course = studentId(courseValue);
     if (!file) throw new BadRequestException('Choose a PDF, DOCX, or text file.');
     let format;
     try { format = validateDocument(file.originalname, file.buffer); } catch (error) { throw new BadRequestException((error as Error).message); }
@@ -69,8 +71,8 @@ class SubmissionController {
     await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: file.buffer, ContentType: format.contentType }));
     try {
       await transaction(async client => {
-      await activeStudent(client, student);
-      await client.query('INSERT INTO submissions(id,organisation_id,filename,object_key,sha256,byte_count,student_id) VALUES($1,$2,$3,$4,$5,$6,$7)', [id, organisation, file.originalname.slice(0,255), key, createHash('sha256').update(file.buffer).digest('hex'), file.size, student]);
+      await activeStudent(client, student, course);
+      await client.query('INSERT INTO submissions(id,organisation_id,filename,object_key,sha256,byte_count,student_id,course_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [id, organisation, file.originalname.slice(0,255), key, createHash('sha256').update(file.buffer).digest('hex'), file.size, student, course]);
       await client.query('INSERT INTO processing_events(submission_id,event) VALUES($1,$2)', [id, 'Submission received']);
       await audit(client, id, 'submission', 'Document uploaded');
       await audit(client, student, 'student', `Document uploaded: ${file.originalname.slice(0,255)}`);
@@ -85,9 +87,15 @@ class SubmissionController {
 @Module({ controllers: [HealthController, SubmissionController, RecordsController], providers: [AccessGuard] }) class AppModule {}
 async function bootstrap() {
   await transaction(async db => {
-    await db.query(await readFile(resolve(__dirname, '../../../database/001_initial.sql'), 'utf8'));
-    await db.query(await readFile(resolve(__dirname, '../../../database/002_records.sql'), 'utf8'));
-    await db.query(await readFile(resolve(__dirname, '../../../database/003_required_student.sql'), 'utf8'));
+    await db.query("SELECT pg_advisory_xact_lock(hashtext('viskopic-schema'))");
+    await db.query('CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+    for (const name of ['001_initial.sql', '002_records.sql', '003_required_student.sql', '004_student_profiles.sql']) {
+      if (!(await db.query('SELECT name FROM schema_migrations WHERE name=$1', [name])).rowCount) {
+        await db.query(await readFile(resolve(__dirname, '../../../database/' + name), 'utf8'));
+        await db.query('INSERT INTO schema_migrations(name) VALUES($1)', [name]);
+      }
+    }
+    await db.query('INSERT INTO organisations(id,name) VALUES($1,$1) ON CONFLICT DO NOTHING', [organisation]);
   });
   for (let attempt=0; ; attempt++) {
     try {

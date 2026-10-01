@@ -18,13 +18,13 @@ Upload a `.pdf`, `.docx`, or UTF-8 `.txt` file of up to 10 MiB. The API validate
 
 ## Student workspaces
 
-Create a course or cohort, then student records with a unique reference within that course and an optional display name. Every submission must belong to a student: upload inside a student record, and use Move document to transfer it to another student. Course and student lists support search and an archived-record filter.
+Students are organisation-wide profiles with a unique student reference and optional display name. Create profiles from Students, enrol them in multiple courses, or add an existing student from a course. Open a profile to view all documents across courses, filter by course, status or date, and select an active enrolled course for upload. Every submission has required student_id and course_id linked to an enrolment. Moving a document requires a valid destination enrolment.
 
 Courses and student records can be edited, archived, and restored. Archived courses block new students and document intake; archived students block document intake. Only empty records can be deleted. Moving documents preserves their extraction results and provenance. Archiving does not delete stored files.
 
 Activity history records record creation, changes, archive/restore, deletion, document assignment, student-detail reads, and document-detail reads. List polling is not audited. Events identify the shared development credential, not a named individual. They are not a tamper-proof compliance log. Authorship baselines and comparison models are not implemented.
 
-The API applies startup migrations under a database lock. `database/003_required_student.sql` enforces NOT NULL on submissions.student_id. If legacy submissions have no student, assign them to their actual student before starting the updated API; see the parent DEPLOYMENT.md. No database reset is needed.
+Startup migrations run once under a schema lock, recorded in schema_migrations. Migration 003 enforces student_id NOT NULL; migration 004 backfills course enrolments and submission course IDs, preserving document IDs and extraction results. Ambiguous duplicate student references are preserved as separate profiles with a legacy suffix and their previous reference in legacy_reference. Profiles are never automatically merged. See the parent DEPLOYMENT.md for handling legacy unassigned documents.
 
 Run `node scripts/records-smoke.mjs` against the running app to check the record lifecycle and student-linked extraction. This creates or reuses a clearly marked synthetic demo course, student, and document.
 
@@ -45,6 +45,8 @@ npm run build
 npm test
 python -m unittest discover -s services/worker
 node scripts/smoke.mjs
+node scripts/profiles-smoke.mjs
+node scripts/migration-smoke.mjs
 docker compose exec -T worker python integration_smoke.py
 ```
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 const base = process.env.API_URL || 'http://127.0.0.1:4300/api';
 const headers = { 'x-access-key': process.env.DEV_ACCESS_KEY || 'local-viskopic-development-key' };
@@ -9,8 +9,8 @@ async function create(path, body) {
   return response.json();
 }
 const course = await create('/courses', { name: 'Synthetic upload smoke test' });
-const student = await create(`/courses/${course.id}/students`, { reference: 'SMOKE' });
-const uploadUrl = `${base}/submissions?studentId=${student.id}`;
+const student = await create(`/courses/${course.id}/students`, { reference: 'SMOKE-' + randomUUID() });
+const uploadUrl = `${base}/submissions?studentId=${student.id}&courseId=${course.id}`;
 const text = 'Synthetic integration test.\r\nNo student data is included.';
 const unauthorised = await fetch(`${base}/submissions`);
 assert.equal(unauthorised.status, 401, 'Missing credentials must be rejected');

@@ -19,7 +19,7 @@ def create_record(path, payload):
         return json.load(response)
 
 course = create_record('/courses', {'name': 'Synthetic DOCX smoke test'})
-student = create_record(f'/courses/{course["id"]}/students', {'reference': 'DOCX-SMOKE'})
+student = create_record(f'/courses/{course["id"]}/students', {'reference': 'DOCX-SMOKE-' + str(uuid.uuid4())})
 
 document = Document()
 document.add_heading('Synthetic Word submission', level=1)
@@ -37,7 +37,7 @@ body = (
     'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n'
 ).encode() + stream.getvalue() + f'\r\n--{boundary}--\r\n'.encode()
 request = urllib.request.Request(
-    f'{API_URL}/submissions?studentId={student["id"]}',
+    f'{API_URL}/submissions?studentId={student["id"]}&courseId={course["id"]}',
     data=body,
     method='POST',
     headers={'Content-Type': f'multipart/form-data; boundary={boundary}', 'x-access-key': ACCESS_KEY},

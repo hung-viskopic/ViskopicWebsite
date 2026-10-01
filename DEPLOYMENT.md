@@ -90,3 +90,11 @@ For an eligible account, use a small x86-64 Ubuntu EC2 instance in Frankfurt wit
 Render + Supabase is the recommended first demo because the repository already supplies its deployment configuration and Render manages HTTPS. AWS requires VM maintenance and proxy setup, and credits have a time limit.
 
 Provider references: https://render.com/docs/free, https://supabase.com/pricing, https://aws.amazon.com/free/free-tier-faqs/.
+
+## 7. Student profiles upgrade
+
+Migration 004 separates student profiles from courses. It creates organisations and enrolments, fills each legacy submission's course_id from its student's original course, and adds a composite foreign key to enrolments. All document IDs, object keys, text and history remain intact. Students with duplicate references in an organisation are kept separate; later duplicates receive an explicit UUID legacy suffix and retain the original reference in legacy_reference. Reconcile these identities manually before any future merge.
+
+Migrations now run once and are tracked in schema_migrations; restarting the API will not recreate the old course_id column on students. A new deployment needs the same five Render secrets. No new service or hosting fee is required.
+
+UI workflow: Students > student profile > Enrol in course > select upload course > Upload document. The profile shows documents from all courses, with course, status and date filters. Courses > Add existing student links an existing profile to a course. Enrolments containing documents can be archived but cannot be removed until those documents are moved to another valid enrolment.

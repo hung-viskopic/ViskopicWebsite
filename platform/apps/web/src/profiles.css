@@ -1,0 +1,15 @@
+.enrolments { border-bottom: 1px solid #d7e1d9; padding: 16px 0; }
+.enrolments h2 { font-size: 15px; margin: 0 0 12px; }
+.enrolment-row { display: grid; grid-template-columns: minmax(0,1fr) 140px auto; gap: 12px; align-items: center; padding: 8px 0; }
+.enrolment-row > span { font-size: 12px; color: #65736a; }
+.enrolment-row > div { display: flex; gap: 8px; }
+.course-link { background: transparent; border: 0; color: #315f51; padding: 6px 0; justify-content: flex-start; text-align: left; overflow-wrap: anywhere; }
+.upload-toolbar { display: flex; gap: 16px; align-items: end; padding: 20px 0; flex-wrap: wrap; border-bottom: 1px solid #d7e1d9; }
+.upload-toolbar label, .document-filters label { display: grid; gap: 7px; font-size: 12px; min-width: 0; }
+.upload-toolbar select { width: 280px; max-width: 100%; }
+.upload-toolbar small { margin-bottom: 12px; }
+.document-filters { display: grid; grid-template-columns: minmax(140px,1fr) minmax(100px,.7fr) minmax(140px,.7fr) minmax(140px,.7fr) auto; gap: 12px; align-items: end; margin-bottom: 20px; }
+.document-filters > span { font-size: 12px; color: #64746b; padding-bottom: 12px; }
+.document-filters input, .document-filters select { width: 100%; }
+@media(max-width:850px) { .document-filters { grid-template-columns: 1fr 1fr; } .enrolment-row { grid-template-columns: minmax(0,1fr) auto; } .enrolment-row > span { grid-column: 1; grid-row: 2; } .enrolment-row > div { grid-column: 2; grid-row: 1 / span 2; } }
+@media(max-width:450px) { .upload-toolbar label { width: 100%; } .upload-toolbar select { width: 100%; } .document-filters { grid-template-columns: minmax(0,1fr); } }
