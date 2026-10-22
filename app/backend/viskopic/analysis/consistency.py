@@ -470,7 +470,7 @@ class ConsistencyPipeline:
         for g, d in sorted(group_mean.items(), key=lambda kv: kv[1], reverse=True)[:3]:
             items.append(EvidenceItem(
                 category="style", kind="feature_group",
-                statement=(f"{GROUP_LABEL.get(g, g)} differs from {baseline} by a typical {fmt_measure(d)} spreads "
+                statement=(f"{GROUP_LABEL.get(g, g)}: a typical difference of {fmt_measure(d)} spreads from {baseline} "
                            f"(averaged over the sampled passages; 0 means identical to the baseline average)."),
                 observed=d, contribution=d / total, details={"group": g},
             ))
@@ -493,6 +493,16 @@ class ConsistencyPipeline:
                 continue
             candidates.append((abs(med), name, med, rows, same_dir))
         candidates.sort(reverse=True)
+        # Some words are counted twice by the model, e.g. "although" and "while" are both function words
+        # and transition words, giving two features with identical values. Show each label once.
+        seen_labels: set[str] = set()
+        unique = []
+        for c in candidates:
+            lab = feature_label(c[1])[0]
+            if lab not in seen_labels:
+                seen_labels.add(lab)
+                unique.append(c)
+        candidates = unique
         clip_total = sum(c[0] for c in candidates) or 1.0
         for absz, name, med, rows, same_dir in candidates[: self.max_feature_items]:
             f0 = rows[0][1]

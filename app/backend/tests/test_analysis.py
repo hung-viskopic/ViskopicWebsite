@@ -412,3 +412,27 @@ def test_remove_while_queued(client, tenant_factory):
     drain()
     doc = client.get(f"/api/documents/{doc_id}", headers=reviewer).json()
     assert doc["status"] == "removed" and doc["word_count"] is None
+
+
+def test_evidence_shows_double_counted_words_once():
+    # The model counts "although" as both a function word and a transition word: two features, one value.
+    import uuid as _uuid
+    from viskopic.analysis.base import ProfileRef
+
+    def feat(name, z):
+        return {"feature": name, "group": "lexical", "used_in_distance": True, "clipped_z_score": z,
+                "reference_mean": 0.02, "reference_std": 0.06, "candidate_value": 0.18}
+    windows = [{"window_id": i, "sampled_text": "nothing to locate", "group_distances": {"lexical": 1.4},
+                "features": [feat("function_although_per_100_words", 2.6),
+                             feat("transition_although_per_100_words", 2.6),
+                             feat("parentheses_per_100_words", 2.9)]} for i in (1, 2, 3)]
+    result = {"evidence": {"windows": windows}, "decision": "same-author-compatible", "profile_papers": 8}
+    m = {"v1_3_centered_similarity": 21.3, "frozen_threshold": 15.7, "margin_to_threshold": 5.6,
+         "relative_distance": 1.26, "raw_distance": 1.18, "shrunk_typical_genuine_distance": 0.94}
+    profile = ProfileRef(_uuid.uuid4(), 1, "enrolled", None, None, 8, 0)
+    items = consistency.ConsistencyPipeline().build_evidence("text", result, m, profile)
+    features = [i for i in items if i.kind == "feature_deviation"]
+    assert sum('Use of "although"' in i.statement for i in features) == 1
+    assert len(features) == 2
+    group = next(i for i in items if i.kind == "feature_group")
+    assert "differs" not in group.statement and "a typical difference of" in group.statement
