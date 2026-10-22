@@ -102,12 +102,18 @@ def main() -> int:
         return 1
 
     by_student: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
-    skipped = 0
+    skipped: list[Path] = []
+    seen: dict[str, Path] = {}
+    duplicates = 0
     for f in files:
         m = FILE_ID.match(f.stem)
         if not m:
-            skipped += 1
+            skipped.append(f)
             continue
+        if f.stem in seen:              # the same assignment in another copy of the corpus
+            duplicates += 1
+            continue
+        seen[f.stem] = f
         try:
             text = extract(f)
         except ET.ParseError as e:
@@ -115,10 +121,20 @@ def main() -> int:
             continue
         by_student[m.group(1)].append((f.stem, text, words(text)))
     if skipped:
-        print(f"Ignored {skipped} files whose names don't look like <student><letter>.xml")
+        print(f"Ignored {len(skipped)} files whose names don't look like <student><letter>.xml, e.g. "
+              + ", ".join(str(p) for p in skipped[:3]))
+    if duplicates:
+        folders = sorted({str(p.parent) for p in seen.values()})
+        print(f"Skipped {duplicates} duplicate copies of the same assignment; used the copies in: "
+              + ", ".join(folders[:3]) + (" ..." if len(folders) > 3 else ""))
 
     need = args.baseline + 1
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    stale = [d for d in args.out_dir.glob("student_*") if d.is_dir()]
+    if stale:
+        print(f"{args.out_dir} already has {len(stale)} student folders from an earlier run: "
+              "delete them first so old and new sets don't mix.", file=sys.stderr)
+        return 1
     rows, eligible = [], []
     for sid, docs in sorted(by_student.items()):
         docs.sort(key=lambda d: d[0])
