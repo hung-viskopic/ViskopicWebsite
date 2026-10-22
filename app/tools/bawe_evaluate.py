@@ -14,7 +14,11 @@ and how well the score separates the two (AUC: 1.0 perfect, 0.5 no better than c
 Scoring goes through the model team's website adapter in its explicit unreviewed/local mode, exactly
 like the website with VISKOPIC_ALLOW_UNREVIEWED_CONSISTENCY=true. Every number is experimental.
 
-Usage (Windows PowerShell, from the repo root; needs:  pip install numpy pandas):
+Usage, easiest: inside the worker container, which already has the model, numpy and pandas
+(PowerShell, from the app folder; the stack doesn't need to be running):
+    docker compose run --rm --no-deps -v D:\\data\\bawe_sets:/sets -v ${PWD}\\tools:/app/tools worker python /app/tools/bawe_evaluate.py /sets --limit 3
+
+Or with a local Python 3.10+ that has numpy and pandas (from the repo root):
     python app\\tools\\bawe_evaluate.py D:\\data\\bawe_sets
     python app\\tools\\bawe_evaluate.py D:\\data\\bawe_sets --limit 5      # quick trial on 5 students
 
@@ -35,7 +39,10 @@ import tempfile
 import time
 from pathlib import Path
 
-VENDOR_DIR = Path(__file__).resolve().parents[1] / "backend" / "vendor" / "consistency_v13"
+_HERE = Path(__file__).resolve().parents[1]
+# app/backend/vendor in the repo; /app/vendor inside the worker container (tools mounted at /app/tools).
+VENDOR_DIR = next((p for p in (_HERE / "backend" / "vendor" / "consistency_v13", _HERE / "vendor" / "consistency_v13")
+                   if p.is_dir()), _HERE / "backend" / "vendor" / "consistency_v13")
 ADAPTER_SHA256 = "96342d69bba75f2ef4d417d30aa6cee216e18f694df391908527085535612598"  # as in consistency.py
 
 
