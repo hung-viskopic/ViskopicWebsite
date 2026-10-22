@@ -1,0 +1,18 @@
+{
+  "version": "Viskopic Calibration V1.2",
+  "frozen_on": "2026-08-17",
+  "k": 5.0,
+  "global_t": 0.875642754326651,
+  "global_t_definition": "Median of per-profile full-profile genuine LOO T values across the 58-author development corpus.",
+  "source_comparisons": "evaluation_results_large_corpus_v1_min5/all_comparisons.csv",
+  "source_comparisons_sha256": "cef58def8f6f0b152e86b73c41ba7eae7e5a62ff788c24add2e896604e31fc4c",
+  "source_authors": 58,
+  "profile_maturity_policy": {
+    "lt_6": "insufficient",
+    "6_to_7": "low_confidence",
+    "8_to_9": "usable",
+    "10_plus": "mature"
+  },
+  "formula": "T_star=(n*T_author+5*T_global)/(n+5); R_star=D/T_star; S=100*exp(-R_star^2/2)",
+  "status": "Development-frozen. Do not retune k or global_t on the future confirmatory author cohort."
+}

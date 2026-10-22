@@ -1,0 +1,46 @@
+{
+  "score_candidate_pdf_v1_2.py": {
+    "reference_source_sha256": "738a51c4050f371b2edc07870ec462563ec6a96d28e081f5ae9095b9e4bea5af",
+    "reference_ast_sha256": "60db741a1fc01e3626e1aec6c051e7ecc9bd9d815be08020ead858243d0d8618",
+    "packaged_sha256": "041947fe9994533485607bcaac97872a0671974b7f715593787aa845b2c90859",
+    "text_scorer_contract": {
+      "load_profile_manifest_ast_sha256": "e95a5f496d719bf0edbab4d3bd5d557c7afb3601025d50b9c3d1eede5f27c70a",
+      "WINDOWS": 3
+    }
+  },
+  "build_multiwindow_corpus_v1_fixed.py": {
+    "reference_source_sha256": "e724368bb1ab1ffca697cb95e1355fbcd333a1dc158e689bb4ea24b865732a08",
+    "reference_ast_sha256": "08b3ae7fc34088455f469389c3b566d7f5ce6ddd35a791347d9d822600073379",
+    "packaged_sha256": "fccbff9d69eccda3f7e56cd08763f57e3e4b8fb6defaf986b3935946159a9df2"
+  },
+  "clean_and_sample_text_v2_1.py": {
+    "reference_source_sha256": "d76ae63cb1b22c0d0780a27d5d1a983edc057ccb82f93696c3314ac33209de3c",
+    "reference_ast_sha256": "e6be2f3082fc1d56b24bd5c49a6d70d982a1e67bcb7ea405f859673faa96422d",
+    "packaged_sha256": "d76ae63cb1b22c0d0780a27d5d1a983edc057ccb82f93696c3314ac33209de3c"
+  },
+  "evaluate_multiwindow_authorship_v1.py": {
+    "reference_source_sha256": "fe14b0c69ee104e75334217f86f6167c1d9370baaa5b076178eb0693cb84ba88",
+    "reference_ast_sha256": "b10602eab7ff62d46ad109c6ee98e70256c5e7d84691782fccee288ae85e2bd3",
+    "packaged_sha256": "13796df61ca32587891233ee1a3b30d203a20b014186606bfab2ab48a6d237eb"
+  },
+  "evaluate_authorship.py": {
+    "reference_source_sha256": "b877b01303c0dc3af6da0e28a54fff4513132c77351ea36f6e5601b3220da70b",
+    "reference_ast_sha256": "d63d8fa275856cd03af8e93c61788431b1016d1d5cf5b74a465240e675fcab3c",
+    "packaged_sha256": "bc0bbf981e14253b16a0d3e047693ea1dcb29f3bcce369fa3587d6d1a670ec0b"
+  },
+  "extract_features_v2_new.py": {
+    "reference_source_sha256": "841ae2a8dbc3886afe33c8ec8ed03189560391ee7b480fe67b9a586722c193cf",
+    "reference_ast_sha256": "5a643b09262a41b0996681a2049374e0ec8a7027a6209346ac598d267bcabb00",
+    "packaged_sha256": "841ae2a8dbc3886afe33c8ec8ed03189560391ee7b480fe67b9a586722c193cf"
+  },
+  "viskopic_calibration_v1_2.py": {
+    "reference_source_sha256": "f797b880f7313e10e1468c9bbf48d4e6bdd2075ae020b8e1130541b04f31df3a",
+    "reference_ast_sha256": "8fc74f607c2d6441e4b8ead7626fa875d9f703def87c7bc20bec7201b4c5abda",
+    "packaged_sha256": "f797b880f7313e10e1468c9bbf48d4e6bdd2075ae020b8e1130541b04f31df3a"
+  },
+  "score_candidate_text_v1_3.py": {
+    "reference_source_sha256": "6f19d0cc47e7d4022c3eaf60f71a16ad25020190a46d1878a36fc687aed36ba1",
+    "reference_ast_sha256": "0b20bfb792165a519b1a5f7025c04437d0c6d7d8bb39dbb7df244ba32276ff9f",
+    "packaged_sha256": "7362d4509b3528a6bb70a7a773119d2097e272876d70bc06d1e08676eeeaef9d"
+  }
+}

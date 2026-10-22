@@ -1,0 +1,63 @@
+{
+  "version": "Viskopic Calibration V1.3 \u2014 Background Centering",
+  "freeze_time_utc": "2026-09-23T17:12:14.306910+00:00",
+  "status": "FROZEN_DEVELOPMENT_SPEC",
+  "representation": "V1.1: three distributed ~550-word windows per document",
+  "base_calibration": {
+    "version": "V1.2",
+    "k": 5.0,
+    "global_t": 0.875642754326651,
+    "base_similarity": "S_v1_2 = 100 * exp(-0.5 * R_star^2)"
+  },
+  "v1_3_rule": {
+    "name": "background-centered V1.2 similarity",
+    "formula": "S_v1_3 = S_v1_2(candidate,target_profile) - median_background_S_v1_2(target_profile)",
+    "background_definition": "Frozen development bank of 58 authors / 635 genuine documents. For a new target profile, score every frozen background document against that target profile using frozen V1.2, then take the median.",
+    "target_author_overlap_rule": "The target-profile author must not contribute documents to the background median. External validation authors are excluded from the development bank by cohort firewall. For development diagnostics, exclude the target author's entire document set.",
+    "background_weighting": "Document-weighted median, matching the development experiment.",
+    "background_scale_division": false
+  },
+  "operating_threshold": {
+    "score": "S_v1_3 centered similarity",
+    "classification_rule": "same-author-compatible if S_v1_3 >= threshold; otherwise stylistically unusual",
+    "selection_method": "Median of the five balanced-accuracy-optimal thresholds learned on training authors only in whole-author CV.",
+    "fold_training_thresholds": [
+      15.435898565930865,
+      15.571572635307284,
+      15.698170436926013,
+      16.135450031116825,
+      16.173526956846572
+    ],
+    "frozen_threshold": 15.698170436926013
+  },
+  "development_cv": {
+    "authors": 58,
+    "documents": 635,
+    "folds": 5,
+    "mean_test_auc": 0.8931301343956767,
+    "mean_test_balanced_accuracy": 0.8334358153719272,
+    "mean_test_far": 0.14654050472435004,
+    "mean_test_frr": 0.18658786453179527,
+    "mean_test_top1": 0.695417968941413,
+    "mean_test_mrr": 0.7963613424805087
+  },
+  "background_bank": {
+    "authors": 58,
+    "documents": 635,
+    "registry": "analysis_large_corpus_v1_min5\\v1_3_background_centering_author_cv_v1\\v1_3_background_bank_documents.csv",
+    "registry_sha256": "017651a90a3d92915b05aa38214b20a79899a549028ebfd2c9cd6baa136da553"
+  },
+  "source_files": {
+    "fold_results": "analysis_large_corpus_v1_min5\\v1_3_background_centering_author_cv_v1\\fold_results.csv",
+    "fold_results_sha256": "fdf55b6009a21746e06765a89759d40c90a8a67083f572f36c09990cbc6865ae",
+    "fold_assignments": "analysis_large_corpus_v1_min5\\shrinkage_author_cv_v1\\author_fold_assignments.csv",
+    "fold_assignments_sha256": "b9cf86fd892fe124bed285c735c89b9c26a3e4aa7aca728740f8134dc927f9fe",
+    "development_comparisons": "evaluation_results_large_corpus_v1_min5\\all_comparisons.csv",
+    "development_comparisons_sha256": "cef58def8f6f0b152e86b73c41ba7eae7e5a62ff788c24add2e896604e31fc4c",
+    "base_calibration": "calibration_v1_2.json",
+    "base_calibration_sha256": "0077906098c0dd672916ce1554ca7600b1fa5c82434f95292b3ef434451bba68"
+  },
+  "validation_rule": "Do not modify this scoring rule, background-bank membership, base V1.2 calibration, or operating threshold after inspecting the next V1.3 external-validation cohort.",
+  "phase1_v1_2_external_usage": "The prior 20-author V1.2 Phase 1 external cohort was used only to motivate the V1.3 research hypothesis. It must not be used to estimate V1.3 parameters or to claim independent V1.3 validation.",
+  "interpretation_warning": "Experimental stylistic-consistency score; not a probability or proof of authorship, non-authorship, AI use, plagiarism, cheating, or misconduct."
+}

@@ -1,0 +1,20 @@
+{
+  "schema": "viskopic-v1.3-background-manifest.v1",
+  "authors": 58,
+  "documents": 635,
+  "windows": 1905,
+  "registry_sha256": "017651a90a3d92915b05aa38214b20a79899a549028ebfd2c9cd6baa136da553",
+  "background_features_sha256": "5e9ef395112d2ac4d8baefa9f5e7c6911734625010980ad691db140c582b7e4e",
+  "v13_config_sha256": "97df8005c39ddca9577bfabd84211d77833c0119691e1f8f800c0d5a96110a72",
+  "frozen_feature_sources": {
+    "score_candidate_pdf_v1_2.py": "041947fe9994533485607bcaac97872a0671974b7f715593787aa845b2c90859",
+    "build_multiwindow_corpus_v1_fixed.py": "fccbff9d69eccda3f7e56cd08763f57e3e4b8fb6defaf986b3935946159a9df2",
+    "clean_and_sample_text_v2_1.py": "d76ae63cb1b22c0d0780a27d5d1a983edc057ccb82f93696c3314ac33209de3c",
+    "evaluate_multiwindow_authorship_v1.py": "13796df61ca32587891233ee1a3b30d203a20b014186606bfab2ab48a6d237eb",
+    "evaluate_authorship.py": "bc0bbf981e14253b16a0d3e047693ea1dcb29f3bcce369fa3587d6d1a670ec0b",
+    "extract_features_v2_new.py": "841ae2a8dbc3886afe33c8ec8ed03189560391ee7b480fe67b9a586722c193cf",
+    "viskopic_calibration_v1_2.py": "f797b880f7313e10e1468c9bbf48d4e6bdd2075ae020b8e1130541b04f31df3a",
+    "score_candidate_text_v1_3.py": "7362d4509b3528a6bb70a7a773119d2097e272876d70bc06d1e08676eeeaef9d"
+  },
+  "scope": "Full frozen background features only. New-profile enrollment and short-text validation remain separate."
+}

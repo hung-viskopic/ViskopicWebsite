@@ -1,0 +1,105 @@
+{
+  "realm": "viskopic",
+  "displayName": "Viskopic (local development)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "roles": {
+    "realm": [
+      { "name": "platform_operator", "description": "Viskopic staff: manage institutions, never see institution data" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "viskopic-web",
+      "name": "Viskopic web app",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email", "basic"],
+      "protocolMappers": [
+        {
+          "name": "viskopic-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "viskopic-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "ops",
+      "email": "ops@viskopic.local",
+      "firstName": "Platform",
+      "lastName": "Operator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viskopic", "temporary": false }],
+      "realmRoles": ["platform_operator", "default-roles-viskopic"]
+    },
+    {
+      "username": "owner",
+      "email": "owner@demo-uni.ac.uk",
+      "firstName": "Olivia",
+      "lastName": "Owner",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viskopic", "temporary": false }]
+    },
+    {
+      "username": "head.law",
+      "email": "head.law@demo-uni.ac.uk",
+      "firstName": "Hamid",
+      "lastName": "Head",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viskopic", "temporary": false }]
+    },
+    {
+      "username": "prof.smith",
+      "email": "prof.smith@demo-uni.ac.uk",
+      "firstName": "Priya",
+      "lastName": "Smith",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viskopic", "temporary": false }]
+    },
+    {
+      "username": "viewer",
+      "email": "viewer@demo-uni.ac.uk",
+      "firstName": "Victor",
+      "lastName": "Viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viskopic", "temporary": false }]
+    },
+    {
+      "username": "owner.other",
+      "email": "owner@other-uni.ac.uk",
+      "firstName": "Oscar",
+      "lastName": "Other",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viskopic", "temporary": false }]
+    }
+  ]
+}

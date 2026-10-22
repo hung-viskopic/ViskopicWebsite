@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "profile_id": "author_1091",
+  "candidate_source": "existing author_1091 live-demo candidate",
+  "candidate_sha256": "a5d56e91893ef4bcc222b60976097fddbc13f05c1571c340801e00e270f59843",
+  "reference_cli_score": -17.419444689933584,
+  "packaged_runtime_score": -17.419444689933584,
+  "absolute_difference": 0.0
+}

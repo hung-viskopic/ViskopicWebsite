@@ -1,0 +1,35 @@
+{
+  "schema": "viskopic-v1.3-mvp-assets.v1",
+  "exported_utc": "2026-10-16T01:55:10.079317+00:00",
+  "source_hashes": {
+    "score_candidate_pdf_v1_2.py": "70ff39d0b44bd44d30d645974505d17d651654b8af09bd80b1f0e0d643155f98",
+    "build_multiwindow_corpus_v1_fixed.py": "ce45ad31fee6c30d2617cae755904bf7814cb12fc02b376fb8d7ce2089caf66c",
+    "clean_and_sample_text_v2_1.py": "a07ef89d037cb8bc1017d1770a2932cfb5ad73edbb1cc60f5b852295149ef1ab",
+    "evaluate_multiwindow_authorship_v1.py": "d8352529095f3f131b0707eee3a88eacac04091b528152e1eb38734d42dc93dd",
+    "evaluate_authorship.py": "8a46ae23efccd2f53e621dc200fdf30e74c25c37586aa26be290033907f8061d",
+    "extract_features_v2_new.py": "81b6e4089fd57bc6c194cfcb814ec1eed94b540a51bf05b1fa8a4bf8a6bcd71b",
+    "viskopic_calibration_v1_2.py": "b84cf38d247671e83c14c0ae1a1cec7b2ed12f1f4f47155ee90a5c652d66e1c2",
+    "score_candidate_text_v1_3.py": "6f19d0cc47e7d4022c3eaf60f71a16ad25020190a46d1878a36fc687aed36ba1"
+  },
+  "source_validation": {
+    "score_candidate_pdf_v1_2.py": "full-module",
+    "build_multiwindow_corpus_v1_fixed.py": "full-module",
+    "clean_and_sample_text_v2_1.py": "full-module",
+    "evaluate_multiwindow_authorship_v1.py": "full-module",
+    "evaluate_authorship.py": "full-module",
+    "extract_features_v2_new.py": "full-module",
+    "viskopic_calibration_v1_2.py": "full-module",
+    "score_candidate_text_v1_3.py": "full-module"
+  },
+  "model_scope": "existing frozen development profiles only",
+  "asset_hashes": {
+    "calibration_v1_2.json": "0077906098c0dd672916ce1554ca7600b1fa5c82434f95292b3ef434451bba68",
+    "calibration_v1_3_background_centering.json": "97df8005c39ddca9577bfabd84211d77833c0119691e1f8f800c0d5a96110a72",
+    "profiles.json": "a65cd1f3e16c2766c3a1966a50b0544b3017f46a9a09b9568d790a092919aa84"
+  },
+  "environment": {
+    "python": "3.14.6",
+    "numpy": "2.5.1",
+    "pandas": "3.0.5"
+  }
+}

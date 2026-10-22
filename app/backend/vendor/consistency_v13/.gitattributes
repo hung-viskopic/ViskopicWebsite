@@ -1,0 +1,7 @@
+# These files have recorded byte-level hashes. Preserve the exported bytes on
+# every platform, including the original mixed line endings in frozen sources.
+viskopic_v13/assets/*.json -text
+viskopic_v13/frozen/*.py -text
+viskopic_v13/frozen/source_provenance.json -text
+viskopic_v13/background/*.json -text
+viskopic_v13/background/*.csv -text

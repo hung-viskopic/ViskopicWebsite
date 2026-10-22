@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "viskopic",
+      "credentials": [{ "accessKey": "viskopic", "secretKey": "viskopic-local-s3-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+{
+  "realm": "viskopic",
+  "displayName": "Viskopic",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "roles": {
+    "realm": [
+      {
+        "name": "platform_operator",
+        "description": "Viskopic staff: manage institutions, never see institution data"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "viskopic-web",
+      "name": "Viskopic web app",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email",
+        "basic"
+      ],
+      "protocolMappers": [
+        {
+          "name": "viskopic-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "viskopic-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "ops",
+      "email": "ops@viskopic.local",
+      "firstName": "Platform",
+      "lastName": "Operator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viskopic",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "platform_operator",
+        "default-roles-viskopic"
+      ],
+      "id": "e135694e-9642-5fa7-a198-beee78fb2758"
+    },
+    {
+      "username": "owner",
+      "email": "owner@demo-uni.ac.uk",
+      "firstName": "Olivia",
+      "lastName": "Owner",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viskopic",
+          "temporary": false
+        }
+      ],
+      "id": "49075f4a-d6f5-5e58-ac5a-94452e447a28"
+    },
+    {
+      "username": "head.law",
+      "email": "head.law@demo-uni.ac.uk",
+      "firstName": "Hamid",
+      "lastName": "Head",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viskopic",
+          "temporary": false
+        }
+      ],
+      "id": "3adf669b-cc90-5035-b92f-322e16500b1d"
+    },
+    {
+      "username": "prof.smith",
+      "email": "prof.smith@demo-uni.ac.uk",
+      "firstName": "Priya",
+      "lastName": "Smith",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viskopic",
+          "temporary": false
+        }
+      ],
+      "id": "0779468a-6196-555f-8623-32e89a589ded"
+    },
+    {
+      "username": "viewer",
+      "email": "viewer@demo-uni.ac.uk",
+      "firstName": "Victor",
+      "lastName": "Viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viskopic",
+          "temporary": false
+        }
+      ],
+      "id": "5ec97e7e-c9cf-5784-9281-165e6529092f"
+    },
+    {
+      "username": "owner.other",
+      "email": "owner@other-uni.ac.uk",
+      "firstName": "Oscar",
+      "lastName": "Other",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "viskopic",
+          "temporary": false
+        }
+      ],
+      "id": "f80f4a77-3431-5d39-9418-8b7659e156a6"
+    }
+  ],
+  "displayNameHtml": "Viskopic",
+  "loginTheme": "viskopic",
+  "internationalizationEnabled": false
+}
