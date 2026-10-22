@@ -255,13 +255,17 @@ def test_awaiting_baseline_then_demonstration_profile(client, tenant_factory, un
     assert report(client, reviewer, doc_id)["total_runs"] == 12
 
     # Outside local development the research papers behind a demonstration profile can't be quality
-    # reviewed, so the same case is no longer scored.
+    # reviewed, so the same case is no longer scored. It is not "awaiting review" either: no review
+    # could make it scoreable, so the reason says so instead of asking for one.
     get_settings().allow_unreviewed_consistency = False
     assert client.post(f"/api/cases/{case_id}/reanalyse", headers=reviewer).status_code == 202
     drain()
     rep = report(client, reviewer, doc_id)
-    assert rep["case"]["status"] == "awaiting_review"
-    assert run(rep, "consistency")["details"]["website_status"] == "quality_review_required"
+    assert rep["case"]["status"] == "evidence_ready"
+    d3 = run(rep, "consistency")
+    assert d3["status"] == "not_eligible" and d3["score"] is None
+    assert d3["details"]["website_status"] == "demo_requires_unreviewed_mode"
+    assert "can't be quality-reviewed" in d3["reason"]
 
 
 def test_baseline_the_model_cannot_use_fails_clearly(client, tenant_factory):
