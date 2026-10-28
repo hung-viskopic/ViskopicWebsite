@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Fragment, useRef, useState } from "react";
 import { EvidenceReport } from "@/components/EvidenceReport";
+import { VivaPanel } from "@/components/VivaPanel";
 import { ActionForm, ErrorNote, Field, PageHeader, Status } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtBytes, fmtDate, useResource } from "@/lib/hooks";
@@ -148,6 +149,8 @@ export default function DocumentDetail() {
       {d.role === "submission" && d.status === "completed" && (
         <EvidenceReport documentId={d.id} canManage={d.access === "manage"} refreshKey={reportKey} />
       )}
+
+      {d.role === "submission" && d.status === "completed" && <VivaPanel documentId={d.id} />}
 
       {d.status === "completed" && (
         <section className="card">

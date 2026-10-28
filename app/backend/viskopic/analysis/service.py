@@ -22,6 +22,7 @@ from ..audit import record
 from ..db import tenant_tx
 from ..deps import institution_dek
 from ..storage import get_storage
+from ..viva import service as viva_service
 from . import consistency
 from .base import AnalysisContext, PipelineInputError, PipelineResult, ProfileRef, QualityRecord
 from .signals import registered_pipelines
@@ -451,6 +452,7 @@ def on_document_removed(conn: Connection, institution_id: UUID, document_id: UUI
         rows = conn.execute("UPDATE cases SET status = 'withdrawn', updated_at = now() WHERE document_id = %s "
                             "RETURNING id", (document_id,)).fetchall()
         changed["cases_withdrawn"] = [str(r["id"]) for r in rows]
+        changed["vivas_revoked"] = viva_service.revoke_for_cases(conn, [r["id"] for r in rows], "document removed")
     # Pending jobs for the document or its case won't find anything to do.
     conn.execute("UPDATE jobs SET status = 'failed', last_error = 'document removed', lease_until = NULL, "
                  "updated_at = now() WHERE status IN ('queued','running') AND (document_id = %s OR case_id IN "

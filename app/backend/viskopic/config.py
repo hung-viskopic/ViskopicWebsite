@@ -51,6 +51,31 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000"
 
+    # Viva. Links in emails point at the web app.
+    web_base_url: str = "http://localhost:3000"
+    viva_max_audio_bytes: int = 10 * 1024 * 1024
+    viva_max_typed_chars: int = 5000
+    viva_answer_grace_seconds: int = 10       # network slack after a question's server deadline
+    viva_rate_limit_per_minute: int = 240     # public token endpoints, per client IP
+
+    # Email (Mailpit locally: SMTP on 1025, inbox at http://localhost:8025).
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    smtp_from: str = "Viskopic <no-reply@viskopic.local>"
+    smtp_tls: bool = False
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+
+    # External AI for vivas: drafting questions from the submission and transcribing spoken answers.
+    # Sending essays and recordings to an outside provider breaks "Viskopic cannot see university data",
+    # so this is for local testing with synthetic essays only. Both switches must be on.
+    viva_ai_provider: str = "none"            # "none" or "openai"
+    allow_external_ai: bool = False
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_question_model: str = "gpt-4o-mini"
+    openai_transcribe_model: str = "whisper-1"   # returns segment timestamps for the speech timeline
+
 
 @lru_cache
 def get_settings() -> Settings:

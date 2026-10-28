@@ -1,0 +1,337 @@
+"""Viva, staff side: draft questions, send invitations, read the report, record assessments."""
+from datetime import timedelta
+from typing import Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from psycopg import Connection
+from pydantic import BaseModel, EmailStr, Field
+
+from .. import access, audit, crypto
+from ..access import MANAGE
+from ..auth import Principal, require_user
+from ..deps import institution_dek, tenant_conn
+from ..storage import get_storage
+from ..viva import ai
+from ..viva import service as viva
+
+router = APIRouter(tags=["viva"])
+
+Kind = Literal["style", "reasoning"]
+Format = Literal["spoken", "typed"]
+
+
+def _case(conn: Connection, p: Principal, case_id: UUID, need: str = access.VIEW) -> dict:
+    case = conn.execute("SELECT id, document_id, student_id, course_id, status FROM cases WHERE id = %s",
+                        (case_id,)).fetchone()
+    if case is None or access.course_access(conn, p, case["course_id"]) is None:
+        raise HTTPException(404, "case not found")
+    if need == MANAGE:
+        access.require_course(conn, p, case["course_id"], MANAGE)
+    return case
+
+
+def _invitation(conn: Connection, p: Principal, invitation_id: UUID, need: str = access.VIEW) -> dict:
+    inv = conn.execute("SELECT * FROM viva_invitations WHERE id = %s", (invitation_id,)).fetchone()
+    if inv is None:
+        raise HTTPException(404, "viva not found")
+    case = _case(conn, p, inv["case_id"], need)
+    return viva.expire_if_due(conn, {**inv, "course_id": case["course_id"], "document_id": case["document_id"]})
+
+
+def _submission_text(conn: Connection, institution_id: UUID, document_id: UUID) -> str:
+    row = conn.execute("SELECT text_enc FROM document_texts WHERE document_id = %s", (document_id,)).fetchone()
+    if row is None:
+        raise HTTPException(409, "the submission has no extracted text")
+    dek = institution_dek(conn, institution_id)
+    return crypto.decrypt(dek, row["text_enc"], f"document_text:{document_id}").decode()
+
+
+INVITATION_COLS = ("id, viva_kind, answer_format, supervision_mode, status, deadline_at, prep_seconds, answer_seconds, "
+                   "is_test, last_error, created_at, sent_at, opened_at, started_at, submitted_at, revoked_at, "
+                   "revoke_reason, replaces_id")
+
+
+# ------------------------------------------------------------------ list and draft
+
+
+@router.get("/documents/{document_id}/vivas")
+def list_vivas(document_id: UUID, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
+    doc = conn.execute("SELECT course_id, role FROM documents WHERE id = %s", (document_id,)).fetchone()
+    if doc is None or access.course_access(conn, p, doc["course_id"]) is None:
+        raise HTTPException(404, "document not found")
+    case = conn.execute("SELECT id, status FROM cases WHERE document_id = %s", (document_id,)).fetchone()
+    invitations = []
+    if case:
+        rows = conn.execute(f"SELECT {INVITATION_COLS} FROM viva_invitations WHERE case_id = %s ORDER BY created_at DESC",
+                            (case["id"],)).fetchall()
+        invitations = [viva.expire_if_due(conn, r) for r in rows]
+        counts = {r["invitation_id"]: r for r in conn.execute(
+            "SELECT q.invitation_id, count(*) AS questions, count(a.id) AS answered FROM viva_questions q "
+            "LEFT JOIN viva_responses a ON a.question_id = q.id AND a.kind <> 'skipped' "
+            "WHERE q.invitation_id = ANY(%s) GROUP BY q.invitation_id", ([r["id"] for r in rows],)).fetchall()}
+        for r in invitations:
+            c = counts.get(r["id"], {})
+            r["questions"], r["answered"] = c.get("questions", 0), c.get("answered", 0)
+    return {
+        "case": case,
+        "can_manage": access.course_access(conn, p, doc["course_id"]) == MANAGE,
+        "ai_enabled": ai.enabled(),
+        "invitations": invitations,
+    }
+
+
+class DraftIn(BaseModel):
+    kind: Kind
+    count: int = Field(default=4, ge=1, le=8)
+
+
+@router.post("/cases/{case_id}/viva-drafts")
+def draft(case_id: UUID, body: DraftIn, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
+    """Suggested questions, not stored. With external AI on, each is tied to a passage of the submission."""
+    case = _case(conn, p, case_id, MANAGE)
+    if not ai.enabled():
+        return {"provider": "templates", "questions": [q.__dict__ for q in ai.template_questions(body.kind, body.count)]}
+    text = _submission_text(conn, p.institution_id, case["document_id"])
+    try:
+        questions = ai.draft_questions(text, body.kind, body.count)
+    except ai.AIUnavailable as e:
+        raise HTTPException(502, str(e)) from e
+    audit.record(conn, p, "viva.questions_drafted", "case", case_id,
+                 {"provider": ai.provider().name, "kind": body.kind, "returned": len(questions)})
+    return {"provider": ai.provider().name, "questions": [q.__dict__ for q in questions]}
+
+
+# ------------------------------------------------------------------ invitations
+
+
+class QuestionIn(BaseModel):
+    text: str = Field(min_length=10, max_length=ai.MAX_QUESTION_CHARS)
+    passage: str | None = Field(default=None, max_length=ai.MAX_PASSAGE_CHARS)
+    source: Literal["ai_draft", "template", "reviewer"] = "reviewer"
+
+
+class InvitationIn(BaseModel):
+    kind: Kind
+    answer_format: Format = "spoken"
+    email: EmailStr
+    deadline_days: int = Field(default=7, ge=1, le=30)
+    prep_seconds: int = Field(default=30, ge=0, le=300)
+    answer_seconds: int = Field(default=120, ge=30, le=600)
+    questions: list[QuestionIn] = Field(min_length=1, max_length=8)
+
+
+@router.post("/cases/{case_id}/viva-invitations", status_code=201)
+def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(require_user),
+                      conn: Connection = Depends(tenant_conn)):
+    case = _case(conn, p, case_id, MANAGE)
+    if case["status"] == "withdrawn":
+        raise HTTPException(409, "the case was withdrawn because its document was removed")
+    text = None
+    questions = []
+    for q in body.questions:
+        item = {"text": q.text.strip(), "source": q.source}
+        if q.passage and q.passage.strip():
+            text = text if text is not None else _submission_text(conn, p.institution_id, case["document_id"])
+            span = ai.locate(text, q.passage)
+            if span is None:
+                raise HTTPException(422, f"this passage is not in the submission: \"{q.passage[:60]}…\"")
+            item.update(passage=text[span[0]:span[1]], passage_start=span[0], passage_end=span[1])
+        questions.append(item)
+    out = _issue(conn, p, case_id, body.kind, body.answer_format, str(body.email), body.deadline_days,
+                 body.prep_seconds, body.answer_seconds, questions, replaces=None)
+    audit.record(conn, p, "viva.invitation_created", "viva_invitation", out["id"],
+                 {"case_id": str(case_id), "kind": body.kind, "format": body.answer_format,
+                  "questions": len(questions), "sources": sorted({q["source"] for q in questions})})
+    return out
+
+
+def _issue(conn: Connection, p: Principal, case_id: UUID, kind: str, fmt: str, email: str, deadline_days: int,
+           prep: int, answer: int, questions: list[dict], replaces: UUID | None) -> dict:
+    dek = institution_dek(conn, p.institution_id)
+    token = viva.new_token()
+    inv_id = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO viva_invitations (id, institution_id, case_id, viva_kind, answer_format, supervision_mode, "
+        "token_sha256, token_ciphertext, email_ciphertext, deadline_at, prep_seconds, answer_seconds, created_by, "
+        "replaces_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (inv_id, p.institution_id, case_id, kind, fmt, "oral_recorded" if fmt == "spoken" else "restricted",
+         viva.token_hash(token), crypto.encrypt(dek, token.encode(), f"viva_token:{inv_id}"),
+         crypto.encrypt(dek, email.encode(), f"viva_invitation_email:{inv_id}"),
+         viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces))
+    viva.create_questions(conn, dek, p.institution_id, inv_id, questions)
+    viva.queue_email(conn, p.institution_id, inv_id)
+    # Test vivas only: the reviewer may open the link directly instead of waiting for the email.
+    return {"id": inv_id, "status": "queued", "test_link": viva.viva_link(token)}
+
+
+class RevokeIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/viva-invitations/{invitation_id}/revoke")
+def revoke(invitation_id: UUID, body: RevokeIn, p: Principal = Depends(require_user),
+           conn: Connection = Depends(tenant_conn)):
+    _invitation(conn, p, invitation_id, MANAGE)
+    if not viva.revoke(conn, invitation_id, body.reason, p.user_id):
+        raise HTTPException(409, "only an open invitation can be revoked")
+    audit.record(conn, p, "viva.invitation_revoked", "viva_invitation", invitation_id, {"reason": body.reason})
+    return {"ok": True}
+
+
+@router.post("/viva-invitations/{invitation_id}/resend", status_code=201)
+def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
+    """Revoke the old link and issue a new one with the same questions (e.g. a lost or failed email)."""
+    inv = _invitation(conn, p, invitation_id, MANAGE)
+    if inv["status"] in ("in_progress", "submitted"):
+        raise HTTPException(409, "the student has already started this viva")
+    dek = institution_dek(conn, p.institution_id)
+    email = crypto.decrypt(dek, inv["email_ciphertext"], f"viva_invitation_email:{invitation_id}").decode()
+    questions = []
+    for q in conn.execute("SELECT * FROM viva_questions WHERE invitation_id = %s ORDER BY position",
+                          (invitation_id,)).fetchall():
+        item = {"text": crypto.decrypt(dek, q["text_ciphertext"], f"viva_question:{q['id']}").decode(),
+                "source": q["source"], "passage_start": q["passage_start"], "passage_end": q["passage_end"]}
+        if q["passage_ciphertext"]:
+            item["passage"] = crypto.decrypt(dek, q["passage_ciphertext"], f"viva_passage:{q['id']}").decode()
+        questions.append(item)
+    viva.revoke(conn, invitation_id, "replaced by a new link", p.user_id)
+    remaining = max(1, (inv["deadline_at"] - viva.now()).days + 1) if inv["status"] != "expired" else 7
+    out = _issue(conn, p, inv["case_id"], inv["viva_kind"], inv["answer_format"], email, min(remaining, 30),
+                 inv["prep_seconds"], inv["answer_seconds"], questions, replaces=invitation_id)
+    audit.record(conn, p, "viva.invitation_resent", "viva_invitation", out["id"], {"replaces": str(invitation_id)})
+    return out
+
+
+# ------------------------------------------------------------------ report
+
+
+@router.get("/viva-invitations/{invitation_id}/report")
+def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
+    inv = _invitation(conn, p, invitation_id)
+    dek = institution_dek(conn, p.institution_id)
+    dec = lambda blob, aad: crypto.decrypt(dek, blob, aad).decode() if blob else None  # noqa: E731
+    qs = conn.execute(
+        "SELECT q.id, q.position, q.text_ciphertext, q.passage_ciphertext, q.passage_start, q.passage_end, q.source, "
+        "rl.released_at, rl.due_at, a.kind AS answer_kind, a.answer_ciphertext, a.id AS response_id, a.seconds_taken, "
+        "a.saved_at, r.id AS recording_id, r.status AS recording_status, r.size_bytes "
+        "FROM viva_questions q LEFT JOIN viva_question_releases rl ON rl.question_id = q.id "
+        "LEFT JOIN viva_responses a ON a.question_id = q.id LEFT JOIN viva_recordings r ON r.question_id = q.id "
+        "WHERE q.invitation_id = %s ORDER BY q.position", (invitation_id,)).fetchall()
+    rec_ids = [q["recording_id"] for q in qs if q["recording_id"]]
+    transcripts = {t["recording_id"]: t for t in conn.execute(
+        "SELECT DISTINCT ON (recording_id) id, recording_id, text_ciphertext, timeline, provider, model, created_at "
+        "FROM viva_transcripts WHERE recording_id = ANY(%s) ORDER BY recording_id, created_at DESC",
+        (rec_ids,)).fetchall()} if rec_ids else {}
+    pending = {j["viva_recording_id"]: j["status"] for j in conn.execute(
+        "SELECT DISTINCT ON (viva_recording_id) viva_recording_id, status FROM jobs WHERE viva_recording_id = ANY(%s) "
+        "ORDER BY viva_recording_id, id DESC", (rec_ids,)).fetchall()} if rec_ids else {}
+    events = conn.execute("SELECT question_id, kind, source, at, detail FROM viva_session_events "
+                          "WHERE invitation_id = %s ORDER BY at, id", (invitation_id,)).fetchall()
+    assessments = conn.execute(
+        "SELECT DISTINCT ON (coalesce(a.question_id::text, 'overall')) a.id, a.question_id, a.rating, "
+        "a.note_ciphertext, a.created_at, u.email AS created_by_email FROM viva_assessments a "
+        "JOIN users u ON u.id = a.created_by WHERE a.invitation_id = %s "
+        "ORDER BY coalesce(a.question_id::text, 'overall'), a.created_at DESC", (invitation_id,)).fetchall()
+    for a in assessments:
+        a["note"] = dec(a.pop("note_ciphertext"), f"viva_assessment:{a['id']}")
+    by_q = {a["question_id"]: a for a in assessments}
+
+    questions = []
+    for q in qs:
+        t = transcripts.get(q["recording_id"])
+        q_events = [e for e in events if e["question_id"] == q["id"]]
+        questions.append({
+            "id": q["id"], "position": q["position"], "source": q["source"],
+            "text": dec(q["text_ciphertext"], f"viva_question:{q['id']}"),
+            "passage": dec(q["passage_ciphertext"], f"viva_passage:{q['id']}"),
+            "passage_start": q["passage_start"], "passage_end": q["passage_end"],
+            "released_at": q["released_at"], "due_at": q["due_at"],
+            "answer_kind": q["answer_kind"], "seconds_taken": q["seconds_taken"], "saved_at": q["saved_at"],
+            "typed_answer": dec(q["answer_ciphertext"], f"viva_response:{q['response_id']}") if q["response_id"] else None,
+            "recording": {"id": q["recording_id"], "status": q["recording_status"], "size_bytes": q["size_bytes"]}
+                         if q["recording_id"] else None,
+            "transcript": {"text": dec(t["text_ciphertext"], f"viva_transcript:{t['id']}"), "timeline": t["timeline"],
+                           "provider": t["provider"], "model": t["model"]} if t else None,
+            "transcript_job": pending.get(q["recording_id"]),
+            "signals": _summarise(q_events),
+            "assessment": by_q.get(q["id"]),
+        })
+    audit.record(conn, p, "viva.report_viewed", "viva_invitation", invitation_id)
+    return {
+        "invitation": {k: inv[k] for k in INVITATION_COLS.replace(" ", "").split(",")} | {"case_id": inv["case_id"],
+                                                                                         "document_id": inv["document_id"]},
+        "can_manage": access.course_access(conn, p, inv["course_id"]) == MANAGE,
+        "questions": questions,
+        "session": _summarise([e for e in events if e["question_id"] is None]) | {
+            "second_sessions": sum(1 for e in events if e["kind"] == "second_session")},
+        "events": [{k: e[k] for k in ("question_id", "kind", "source", "at")} for e in events],
+        "overall": by_q.get(None),
+    }
+
+
+def _summarise(events: list[dict]) -> dict:
+    """Neutral counts for the reviewer. Browser-reported events are self-reported and can be suppressed."""
+    out = {"focus_lost": 0, "away_seconds": 0.0, "paste_blocked": 0, "fullscreen_exit": 0, "late_write": 0,
+           "timed_out": False, "mic_unavailable": False}
+    lost_at = None
+    for e in events:
+        k = e["kind"]
+        if k == "focus_lost":
+            out["focus_lost"] += 1
+            lost_at = e["at"]
+        elif k == "focus_back" and lost_at is not None:
+            out["away_seconds"] += (e["at"] - lost_at).total_seconds()
+            lost_at = None
+        elif k in ("paste_blocked", "fullscreen_exit", "late_write"):
+            out[k] += 1
+        elif k == "question_timed_out":
+            out["timed_out"] = True
+        elif k == "mic_unavailable":
+            out["mic_unavailable"] = True
+    out["away_seconds"] = round(out["away_seconds"], 1)
+    return out
+
+
+@router.get("/viva-recordings/{recording_id}/audio")
+def audio(recording_id: UUID, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
+    rec = conn.execute("SELECT id, invitation_id, storage_key, mime_type, status FROM viva_recordings WHERE id = %s",
+                       (recording_id,)).fetchone()
+    if rec is None:
+        raise HTTPException(404, "recording not found")
+    _invitation(conn, p, rec["invitation_id"])
+    if rec["status"] != "stored":
+        raise HTTPException(410, "the recording was deleted")
+    dek = institution_dek(conn, p.institution_id)
+    data = crypto.decrypt(dek, get_storage().get(rec["storage_key"]), f"viva_audio:{recording_id}")
+    audit.record(conn, p, "viva.audio_played", "viva_recording", recording_id)
+    return Response(content=data, media_type=rec["mime_type"],
+                    headers={"Cache-Control": "no-store", "Content-Disposition": "inline"})
+
+
+class AssessmentIn(BaseModel):
+    question_id: UUID | None = None
+    rating: Literal["consistent", "unclear", "concern"]
+    note: str | None = Field(default=None, max_length=4000)
+
+
+@router.post("/viva-invitations/{invitation_id}/assessments", status_code=201)
+def assess(invitation_id: UUID, body: AssessmentIn, p: Principal = Depends(require_user),
+           conn: Connection = Depends(tenant_conn)):
+    inv = _invitation(conn, p, invitation_id, MANAGE)
+    if inv["status"] != "submitted":
+        raise HTTPException(409, "the viva has not been submitted yet")
+    if body.question_id and not conn.execute("SELECT 1 FROM viva_questions WHERE id = %s AND invitation_id = %s",
+                                             (body.question_id, invitation_id)).fetchone():
+        raise HTTPException(422, "question not in this viva")
+    dek = institution_dek(conn, p.institution_id)
+    aid = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
+    note = body.note.strip() if body.note else None
+    conn.execute(
+        "INSERT INTO viva_assessments (id, institution_id, invitation_id, question_id, rating, note_ciphertext, created_by) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+        (aid, p.institution_id, invitation_id, body.question_id, body.rating,
+         crypto.encrypt(dek, note.encode(), f"viva_assessment:{aid}") if note else None, p.user_id))
+    audit.record(conn, p, "viva.assessment_recorded", "viva_invitation", invitation_id,
+                 {"question_id": str(body.question_id) if body.question_id else None, "rating": body.rating})
+    return {"id": aid}

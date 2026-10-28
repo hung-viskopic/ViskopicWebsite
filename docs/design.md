@@ -32,7 +32,7 @@ flowchart TD
     QR -- yes --> D[Analysis: plug-in pipelines ✅ Δ · 🔜 α β]
     D --> E[Evidence report ✅]
     E -- no concern --> X[Closed]
-    E -- concern --> F[Viva: style or reasoning 🔜]
+    E -- concern --> F[Viva: style or reasoning ✅ MVP]
     F --> G[Human decision with rationale 🔜]
     G --> H[Appeal, different reviewer 🔜]
     G --> I[Outcome recorded]
@@ -139,8 +139,34 @@ Milestones 4–5 added ([`0002_analysis.sql`](../app/backend/migrations/0002_ana
 (append-only; outcome + text digest + who/when, no text). Jobs gained the kinds
 `build_profile` and `analyse_case`.
 
-Next milestones add: `segments` (with pgvector embeddings), `evaluator_configs`, `evaluations`, `viva_sessions`,
-`viva_questions`, `decisions`, `appeals`.
+Milestone 6a/6b MVP added ([`0005_viva.sql`](../app/backend/migrations/0005_viva.sql)): `viva_invitations`
+(token stored as a SHA-256 hash; student email encrypted; supervision mode and timings frozen at send),
+`viva_questions` (frozen copy of what was sent, optional essay passage with offsets), `viva_question_releases`
+(server release time and deadline per question), `viva_responses`, `viva_recordings` (encrypted audio in object
+storage), `viva_transcripts` (encrypted text plus a numbers-only speech timeline), `viva_session_events` and
+`viva_assessments`. All append-only except invitations and recordings. Jobs gained `send_viva_email` and
+`transcribe_viva_answer`. `viva_resolve_token` is the only way to turn a student's token into a tenant.
+
+Next milestones add: `segments` (with pgvector embeddings), `evaluator_configs`, `evaluations`, `decisions`,
+`appeals`, and the later supervision modes (live, invigilated room, third-party proctor).
+
+### Viva MVP (6a/6b)
+
+A reviewer sends a viva from a submission. Questions come from the template bank or, with external AI switched on
+(local testing with synthetic essays only), are drafted from the submission, each tied to a passage that must be
+found verbatim in the essay. The reviewer edits and approves every question.
+
+The student opens an emailed link (no staff login) and answers one question at a time. Rules enforced on the
+server: a question is released only after the previous one is answered or timed out (no reading ahead, no going
+back); each deadline is measured from release (think time + answer time), with a 10 s grace; one browser session
+at a time (opening the link elsewhere takes the session over and is recorded). Spoken answers are recorded in the
+browser and transcribed by a worker job when external AI is on; typed answers block paste.
+
+The report shows each question, the passage, the recording (played through the API, audited), the automatic
+transcript, a speech/silence timeline and neutral signals (left the page, paste attempts, late answers, device
+switch). Browser-reported signals are labelled as such. Reviewers rate each answer (consistent / unclear /
+concern); a rating is not a decision. Deliberately not built: face, gaze, voice-stress or object detection (see
+`docs/decisions/0008-viva-supervision-mvp.md`).
 
 ## 5. System (localhost) ✅
 
@@ -155,6 +181,8 @@ flowchart LR
     WK[Worker] -- claim jobs --> P
     WK --> M
     WK --> X[Sandboxed extractor<br/>CPU/memory/time limits]
+    WK -- viva emails --> ML[Mailpit :8025]
+    S[Student browser<br/>/viva/token] -- token only --> A
 ```
 
 - One Python codebase runs as both API and worker.
@@ -201,6 +229,8 @@ option to deploy into the university's own cloud account.
 4. ✅ Cases and baselines: case creation on submission, versioned encrypted baseline profiles, eligibility
 5. ✅ Pipeline contract, document-signal pipeline, **real Δ (V1.3)** through the model team's website contract with
    quality reviews, α/β placeholders, evidence report UI
-6. 🔜 Evaluator with versioned θ, viva questions linked to evidence, decisions, appeals
+6. 🟡 Viva MVP ✅ (invitations, AI-drafted questions anchored to the essay, timed spoken/typed answers enforced by
+   the server, transcripts, speech timeline, signals, report and ratings). 🔜 Evaluator with versioned θ, live and
+   invigilated supervision, decisions, appeals
 7. 🔜 Real α (semantic) and β (regeneration) pipelines; a validated Δ student configuration (fewer, shorter
    baseline essays) from the model team

@@ -87,7 +87,11 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - Δ V1.3 needs ≥8 baseline documents of ≥1,650 usable words each and ≥1,650-word submissions — stricter than the
   product rule (3 essays / 1,500 words). Don't lower these constants: a student configuration must come from the
   model team with its own validation.
-- 🔜 Next: evaluator with versioned θ → viva questions linked to evidence → decisions with evidence snapshot →
+- ✅ Viva MVP (6a/6b, `0005_viva.sql`, `routers/viva.py`, `routers/viva_public.py`, `viskopic/viva/`): reviewer sends
+  a viva from a submission; student answers by token link, one server-released question at a time, spoken
+  (recorded) or typed (paste blocked), deadlines enforced on the server, one session at a time. Report with
+  recording, transcript, speech timeline, signals and per-answer ratings. Mailpit for email. 12 viva tests.
+- 🔜 Next: evaluator with versioned θ → live/invigilated supervision → decisions with evidence snapshot →
   appeals → real α and β pipelines.
 
 ## Working conventions
@@ -100,3 +104,10 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - Never load real student work until a DPIA, DPA and KMS-backed keys are in place.
 - `VISKOPIC_ALLOW_DEMO_PROFILES` and `VISKOPIC_ALLOW_UNREVIEWED_CONSISTENCY` must be false anywhere outside local
   development.
+- Viva rules to keep: the student page (`app/web/app/viva/[token]`) sits outside the keycloak wrapper and is the only
+  page allowed the microphone; public endpoints take only the token, resolve it through `viva_resolve_token` and
+  return nothing about the case or analysis; timing and question release are decided on the server, never by the
+  browser; browser signals are hints, labelled as self-reported; a viva rating is not a decision.
+- `VISKOPIC_ALLOW_EXTERNAL_AI` sends essays and recordings to OpenAI (question drafts, transcription). Synthetic test
+  essays only; false anywhere real student work could be present. Drafted passages must be found verbatim in the
+  essay; the AI never rates answers.

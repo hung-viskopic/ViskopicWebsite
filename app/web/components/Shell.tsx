@@ -71,6 +71,9 @@ function Nav() {
 }
 
 export function Shell({ children }: { children: ReactNode }) {
+  const path = usePathname();
+  // The student viva page is reached by an emailed link and has no staff sign-in.
+  if (path.startsWith("/viva/")) return <>{children}</>;
   return (
     <AuthProvider>
       <div className="layout">

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import close_pool
-from .routers import academic, analysis, documents, me, people, platform
+from .routers import academic, analysis, documents, me, people, platform, viva, viva_public
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -15,8 +15,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "X-Viva-Session"],
     )
 
     @app.middleware("http")
@@ -31,7 +31,8 @@ def create_app() -> FastAPI:
     def health():
         return {"ok": True}
 
-    for r in (me.router, platform.router, people.router, academic.router, documents.router, analysis.router):
+    for r in (me.router, platform.router, people.router, academic.router, documents.router, analysis.router,
+              viva.router, viva_public.router):
         app.include_router(r, prefix="/api")
 
     app.add_event_handler("shutdown", close_pool)

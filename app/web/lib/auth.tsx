@@ -31,6 +31,7 @@ type AuthState = {
   me: Me | null;
   error: string | null;
   api: <T = unknown>(path: string, init?: RequestInit) => Promise<T>;
+  apiBlob: (path: string) => Promise<Blob>;
   logout: () => void;
 };
 
@@ -73,6 +74,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res.json() as Promise<T>;
   }, []);
 
+  const apiBlob = useCallback(async (path: string): Promise<Blob> => {
+    const k = kc.current;
+    if (!k) throw new ApiError(401, "not signed in");
+    await k.updateToken(30).catch(() => k.login());
+    const res = await fetch(`${config.apiUrl}/api${path}`, { headers: { Authorization: `Bearer ${k.token}` } });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, describe(body.detail));
+    }
+    return res.blob();
+  }, []);
+
   useEffect(() => {
     if (kc.current) return;
     const k = new Keycloak({ url: config.keycloakUrl, realm: config.realm, clientId: config.clientId });
@@ -107,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
   if (!me) return <div className="center-screen muted">Signing in…</div>;
-  return <AuthContext.Provider value={{ me, error, api, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ me, error, api, apiBlob, logout }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {

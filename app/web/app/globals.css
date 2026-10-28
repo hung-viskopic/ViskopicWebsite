@@ -369,3 +369,43 @@ table.compact td, table.compact th { padding: 6px 8px; font-size: 13px; }
 @media (max-width: 480px) {
   .filters { grid-template-columns: 1fr; }
 }
+
+/* ---------- viva: staff side */
+.viva-form { border-top: 1px solid var(--mist); padding-top: 16px; display: grid; gap: 16px; }
+.viva-questions h3 { margin: 0; }
+.viva-question-list { margin: 0; padding-left: 20px; display: grid; gap: 16px; }
+.viva-question-list li { display: grid; gap: 8px; }
+.viva-question-tools { display: flex; gap: 14px; flex-wrap: wrap; }
+.viva-question-tools .link:disabled { opacity: 0.4; cursor: default; }
+.viva-actions { display: inline-flex; gap: 12px; margin-left: 12px; flex-wrap: wrap; }
+.viva-passage { margin: 0 0 12px; padding: 10px 14px; border-left: 3px solid var(--blue); background: var(--blue-soft); border-radius: 0 var(--radius) var(--radius) 0; }
+.viva-passage .label { display: block; margin-bottom: 4px; }
+.viva-passage p { margin: 0; }
+.viva-q-text { font-size: 18px; font-weight: 600; line-height: 1.45; margin: 0 0 14px; }
+.viva-audio { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 4px 0 12px; }
+.viva-audio audio { max-width: 100%; }
+.viva-timeline { margin: 0 0 12px; }
+.viva-timeline svg { width: 100%; height: 28px; display: block; }
+.viva-tl-silence { fill: var(--mist); }
+.viva-tl-speech { fill: var(--navy-light); }
+.viva-assess { border-top: 1px solid var(--mist); margin-top: 14px; padding-top: 12px; }
+
+/* ---------- viva: student page (no staff navigation) */
+.viva-page { min-height: 100vh; background: var(--paper); }
+.viva-top { display: flex; align-items: center; gap: 10px; padding: 14px 20px; background: var(--white); border-bottom: 1px solid var(--line); font-weight: 600; }
+.viva-test { font-size: 12px; font-weight: 700; color: var(--amber); border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; }
+.viva-main { max-width: 720px; margin: 0 auto; padding: 28px 16px 60px; }
+.viva-main .card.narrow { max-width: 640px; margin: 0 auto; }
+.viva-intro ul { padding-left: 20px; }
+.viva-intro li { margin-bottom: 6px; }
+.viva-consent { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; font-weight: 600; }
+.viva-consent input { margin-top: 4px; width: 18px; height: 18px; }
+.viva-progress { font-size: 13px; font-weight: 600; color: var(--ink-soft); margin: 0 0 12px; }
+.viva-phase { display: grid; gap: 10px; justify-items: start; border-top: 1px solid var(--mist); padding-top: 14px; }
+.viva-phase .field { width: 100%; }
+.viva-clock { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 0; }
+.viva-recording { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--red); margin: 0; }
+.viva-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: viva-pulse 1.2s ease-in-out infinite; }
+@keyframes viva-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .viva-dot { animation: none; } }
+ul.chips { list-style: none; padding: 0; margin-left: 0; }

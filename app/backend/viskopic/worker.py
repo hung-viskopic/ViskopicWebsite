@@ -24,6 +24,8 @@ from .analysis import service as analysis
 from .analysis.service import JobError
 from .intake.extraction import ExtractionError, extract_sandboxed
 from .storage import get_storage
+from .viva import service as viva
+from .viva.service import VivaJobError
 
 log = logging.getLogger("viskopic.worker")
 # Building a profile scores the whole frozen background bank, so it gets a longer lease.
@@ -31,6 +33,7 @@ CLAIM_SQL = """
 UPDATE jobs SET status = 'running', attempts = attempts + 1,
        lease_until = now() + CASE kind WHEN 'build_profile' THEN interval '20 minutes'
                                        WHEN 'analyse_case' THEN interval '5 minutes'
+                                       WHEN 'transcribe_viva_answer' THEN interval '5 minutes'
                                        ELSE interval '2 minutes' END,
        updated_at = now()
 WHERE id = (
@@ -39,7 +42,8 @@ WHERE id = (
      OR (status = 'running' AND lease_until < now())
   ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1
 )
-RETURNING id, institution_id, kind, document_id, profile_id, case_id, attempts, max_attempts
+RETURNING id, institution_id, kind, document_id, profile_id, case_id, viva_invitation_id, viva_recording_id,
+          attempts, max_attempts
 """
 
 
@@ -63,9 +67,13 @@ def process_one() -> bool:
             analysis.run_build_profile(job)
         elif job["kind"] == "analyse_case":
             analysis.run_analyse_case(job)
+        elif job["kind"] == "send_viva_email":
+            viva.run_send_email(job)
+        elif job["kind"] == "transcribe_viva_answer":
+            viva.run_transcribe(job)
         else:
             raise JobError(f"unknown job kind {job['kind']}", permanent=True)
-    except (ExtractionError, JobError) as e:
+    except (ExtractionError, JobError, VivaJobError) as e:
         if e.permanent or job["attempts"] >= job["max_attempts"]:
             _fail(job, str(e))
         else:
@@ -138,6 +146,12 @@ def _fail(job: dict, message: str) -> None:
             "UPDATE jobs SET status = 'failed', last_error = %s, lease_until = NULL, updated_at = now() WHERE id = %s",
             (message, job["id"]),
         )
+        if job["kind"] == "send_viva_email":
+            viva.on_email_failed(conn, job, message)
+            return
+        if job["kind"] == "transcribe_viva_answer":
+            viva.on_transcribe_failed(conn, job, message)
+            return
         if job["kind"] != "extract_document":
             analysis.on_job_failed(conn, job, message)
             return

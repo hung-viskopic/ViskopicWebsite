@@ -187,3 +187,98 @@ export type ProfilesResponse = {
     unreviewed_scoring_allowed: boolean;
   };
 };
+
+// ------------------------------------------------------------------ viva
+
+export type VivaInvitation = {
+  id: string;
+  viva_kind: "style" | "reasoning";
+  answer_format: "spoken" | "typed";
+  supervision_mode: "oral_recorded" | "restricted";
+  status: string;
+  deadline_at: string;
+  prep_seconds: number;
+  answer_seconds: number;
+  is_test: boolean;
+  last_error: string | null;
+  created_at: string;
+  sent_at: string | null;
+  opened_at: string | null;
+  started_at: string | null;
+  submitted_at: string | null;
+  revoked_at: string | null;
+  revoke_reason: string | null;
+  replaces_id: string | null;
+  questions?: number;
+  answered?: number;
+};
+
+export type VivaList = {
+  case: { id: string; status: string } | null;
+  can_manage: boolean;
+  ai_enabled: boolean;
+  invitations: VivaInvitation[];
+};
+
+export type DraftQuestion = {
+  text: string;
+  source: "ai_draft" | "template" | "reviewer";
+  passage: string | null;
+  passage_start?: number | null;
+  passage_end?: number | null;
+};
+
+export type VivaSignals = {
+  focus_lost: number;
+  away_seconds: number;
+  paste_blocked: number;
+  fullscreen_exit: number;
+  late_write: number;
+  timed_out: boolean;
+  mic_unavailable: boolean;
+};
+
+export type VivaTimeline = {
+  duration_ms: number;
+  first_speech_ms: number | null;
+  speech_ms: number;
+  segments: [number, number][];
+  longest_pause_ms: number;
+  pauses_over_3s: number;
+};
+
+export type VivaAssessment = {
+  id: string;
+  question_id: string | null;
+  rating: "consistent" | "unclear" | "concern";
+  note: string | null;
+  created_at: string;
+  created_by_email: string;
+};
+
+export type VivaReportQuestion = {
+  id: string;
+  position: number;
+  source: string;
+  text: string;
+  passage: string | null;
+  released_at: string | null;
+  due_at: string | null;
+  answer_kind: "typed" | "spoken" | "skipped" | null;
+  seconds_taken: number | null;
+  saved_at: string | null;
+  typed_answer: string | null;
+  recording: { id: string; status: string; size_bytes: number } | null;
+  transcript: { text: string; timeline: VivaTimeline; provider: string; model: string } | null;
+  transcript_job: string | null;
+  signals: VivaSignals;
+  assessment: VivaAssessment | null;
+};
+
+export type VivaReport = {
+  invitation: VivaInvitation & { case_id: string; document_id: string };
+  can_manage: boolean;
+  questions: VivaReportQuestion[];
+  session: VivaSignals & { second_sessions: number };
+  overall: VivaAssessment | null;
+};

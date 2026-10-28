@@ -2,6 +2,7 @@
 #   cp .env.example .env   (then set VISKOPIC_LOCAL_MASTER_KEY_B64)
 #   docker compose up --build
 # Web: http://localhost:3000   API: http://localhost:8000/docs   Keycloak: http://localhost:18080   S3: http://localhost:8333
+# Mail (viva invitations land here, nothing leaves your machine): http://localhost:8025
 # Host ports can be changed in .env if Windows reports "ports are not available".
 
 name: viskopic
@@ -53,6 +54,11 @@ services:
       interval: 5s
       retries: 40
 
+  # Local mail catcher: viva invitation emails are delivered here instead of to real inboxes.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["127.0.0.1:${MAILPIT_HOST_PORT:-8025}:8025"]
+
   migrate:
     build: ./backend
     command: python -m viskopic.migrate
@@ -66,6 +72,9 @@ services:
       VISKOPIC_S3_ACCESS_KEY: viskopic
       VISKOPIC_S3_SECRET_KEY: viskopic-local-s3-secret
       VISKOPIC_CORS_ORIGINS: http://localhost:3000
+      VISKOPIC_WEB_BASE_URL: http://localhost:3000
+      VISKOPIC_SMTP_HOST: mailpit
+      VISKOPIC_SMTP_PORT: "1025"
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -88,6 +97,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       s3: { condition: service_started }
+      mailpit: { condition: service_started }
 
   web:
     build:

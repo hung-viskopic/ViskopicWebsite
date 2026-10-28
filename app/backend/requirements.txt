@@ -13,3 +13,4 @@ pypdf==5.1.0
 defusedxml==0.7.1
 numpy==2.5.1
 pandas==3.0.5
+httpx==0.28.1
