@@ -1,6 +1,6 @@
 """The pipeline contract.
 
-Every analysis pipeline (Δ consistency, β language, α authenticity, document signals)
+Every analysis pipeline (Δ consistency, Pipeline 2 interchangeability, α authenticity, document signals)
 implements `Pipeline.run(ctx) -> PipelineResult`. A result is never a bare score: it carries
 evidence items (template statements with the observed value against the student's own
 baseline, character spans to highlight, and a contribution), plus the pipeline's version and
@@ -67,6 +67,10 @@ class AnalysisContext:
     profiles: dict[str, ProfileRef] = field(default_factory=dict)   # pipeline name -> ready profile
     candidate_quality: QualityRecord | None = None   # review of this submission's text, if any
     reference_quality: QualityRecord | None = None   # combined review of the profile's baseline documents
+    # Pipeline 2: the assignment's AI comparison set (AI-written essays only) and the prompt it was made from.
+    comparison_set: dict | None = None
+    assignment_prompt: str | None = None
+    comparison_missing_reason: str = ""
 
 
 @dataclass

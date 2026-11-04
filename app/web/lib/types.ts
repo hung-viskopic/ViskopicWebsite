@@ -24,7 +24,17 @@ export type Student = {
   enrolment_status?: string;
 };
 
-export type Assignment = { id: string; title: string; prompt: string | null; genre: string | null; due_at: string | null };
+export type Assignment = {
+  id: string;
+  title: string;
+  prompt: string | null;
+  genre: string | null;
+  due_at: string | null;
+  /** Pipeline 2: the assignment's AI comparison essays (generated from the prompt only). */
+  comparison_status?: "queued" | "building" | "ready" | "failed" | "superseded" | null;
+  comparison_families?: string[] | null;
+  comparison_error?: string | null;
+};
 
 export type DocumentRow = {
   id: string;
@@ -107,6 +117,10 @@ export type AnalysisRun = {
     candidate_usable_words?: number;
     model_version?: string;
     windows?: { window: number; raw_distance: number; sampled_words: number; span: Omit<Span, "window"> | null }[];
+    // Pipeline 2 (interchangeability).
+    families?: string[];
+    family_scores?: Record<string, number>;
+    all_families?: boolean;
   };
   created_at: string;
   profile: {
@@ -149,11 +163,34 @@ export type QualityReview = {
   current: boolean;
 };
 
+/** One pipeline's part in the combined report (the model team's "either flags" rule). */
+export type CombinedPart = {
+  status: "flagged" | "not_flagged" | "unavailable";
+  explanation?: string;
+  reason?: string;
+  score?: number | null;
+  threshold?: number | null;
+};
+
+export type CombinedReport = {
+  status: "review_recommended" | "no_flag" | "insufficient_evidence";
+  version: string;
+  created_at: string;
+  summary: string;
+  flagged_by: string[];
+  pipelines_run: number;
+  pipeline1_consistency: CombinedPart;
+  pipeline2_interchangeability: CombinedPart;
+  coverage_notes: string[];
+  interpretation_warning: string;
+};
+
 export type AnalysisReport = {
   role: "baseline" | "submission";
   case: { id: string; status: string; created_at: string; updated_at: string } | null;
   runs: AnalysisRun[];
   total_runs?: number;
+  combined?: CombinedReport | null;
 };
 
 export type BaselineProfile = {
@@ -210,6 +247,8 @@ export type VivaInvitation = {
   revoked_at: string | null;
   revoke_reason: string | null;
   replaces_id: string | null;
+  followups_enabled: boolean;
+  question_engine: string | null;
   questions?: number;
   answered?: number;
 };
@@ -218,13 +257,18 @@ export type VivaList = {
   case: { id: string; status: string } | null;
   can_manage: boolean;
   ai_enabled: boolean;
+  visq_enabled: boolean;
   invitations: VivaInvitation[];
 };
 
 export type DraftQuestion = {
   text: string;
-  source: "ai_draft" | "template" | "reviewer";
+  source: "visq" | "template" | "reviewer";
   passage: string | null;
+  /** Visq question type (tradeoff, limit, case). */
+  qtype?: string | null;
+  /** What a good answer covers. Reviewer only: never shown to the student. */
+  reviewer_note?: string | null;
   passage_start?: number | null;
   passage_end?: number | null;
 };
@@ -258,10 +302,22 @@ export type VivaAssessment = {
   created_by_email: string;
 };
 
+export type FollowupDecision = {
+  action: "follow_up" | "move_on";
+  reason: "model" | "no_answer" | "timeout" | "error" | "disabled";
+  why: string | null;
+  engine: string | null;
+  created_at: string;
+};
+
 export type VivaReportQuestion = {
   id: string;
   position: number;
   source: string;
+  qtype: string | null;
+  parent_id: string | null;
+  reviewer_note: string | null;
+  followup_decision: FollowupDecision | null;
   text: string;
   passage: string | null;
   released_at: string | null;

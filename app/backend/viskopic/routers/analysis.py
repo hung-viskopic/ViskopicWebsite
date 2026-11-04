@@ -15,9 +15,10 @@ from .academic import _visible_student
 
 router = APIRouter(tags=["analysis"])
 
-PIPELINE_ORDER = ["consistency", "language", "authenticity", "document_signals"]
+PIPELINE_ORDER = ["consistency", "interchangeability", "language", "authenticity", "document_signals"]
 PIPELINE_LABEL = {
     "consistency": "Δ Consistency (writing style)",
+    "interchangeability": "Pipeline 2: Interchangeability (vs AI essays on this assignment)",
     "language": "β Language (regeneration)",
     "authenticity": "α Authenticity (semantic)",
     "document_signals": "Document signals",
@@ -150,9 +151,18 @@ def _report(conn: Connection, case: dict) -> dict:
         r["label"] = PIPELINE_LABEL.get(r["pipeline"], r["pipeline"])
         r["evidence"] = by_run.get(r["id"], [])
         r["profile"] = prof_rows.get(r["profile_id"])
+    combined = next((r for r in runs if r["pipeline"] == "combined"), None)
+    # Older analyses still have the β placeholder run; Pipeline 2 now fills that slot.
+    newer = {r["pipeline"] for r in runs}
+    runs = [r for r in runs if r["pipeline"] != "combined"
+            and not (r["pipeline"] == "language" and "interchangeability" in newer)]
     runs.sort(key=lambda r: PIPELINE_ORDER.index(r["pipeline"]) if r["pipeline"] in PIPELINE_ORDER else 99)
-    history = conn.execute("SELECT count(*) AS n FROM analysis_runs WHERE case_id = %s", (case["id"],)).fetchone()["n"]
-    return {"case": case, "runs": runs, "total_runs": history}
+    history = conn.execute("SELECT count(*) AS n FROM analysis_runs WHERE case_id = %s AND pipeline <> 'combined'",
+                           (case["id"],)).fetchone()["n"]
+    return {"case": case, "runs": runs, "total_runs": history,
+            "combined": None if combined is None else {
+                "status": combined["outcome"], "version": combined["pipeline_version"],
+                "created_at": combined["created_at"], **combined["details"]}}
 
 
 @router.get("/documents/{document_id}/analysis")

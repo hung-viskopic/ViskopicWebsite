@@ -8,7 +8,13 @@ import { fmtDate, useResource } from "@/lib/hooks";
 import type { DraftQuestion, VivaList } from "@/lib/types";
 
 const kindLabel = { style: "Style viva", reasoning: "Reasoning viva" } as const;
-const sourceLabel: Record<string, string> = { ai_draft: "AI draft", template: "Template", reviewer: "Written by reviewer" };
+const sourceLabel: Record<string, string> = {
+  visq: "Visq draft", ai_draft: "AI draft", template: "Template", reviewer: "Written by reviewer",
+};
+/** Visq question types, in the words a reviewer would use. */
+export const qtypeLabel: Record<string, string> = {
+  tradeoff: "Trade-off", limit: "What if a reason failed", case: "New case", followup: "Follow-up", link: "Linked",
+};
 
 /** Viva section on a submission: list of invitations and the form to send a new one. */
 export function VivaPanel({ documentId }: { documentId: string }) {
@@ -34,7 +40,7 @@ export function VivaPanel({ documentId }: { documentId: string }) {
         </p>
       )}
       {open && v?.case && (
-        <InvitationForm caseId={v.case.id} aiEnabled={v.ai_enabled}
+        <InvitationForm caseId={v.case.id} aiEnabled={v.ai_enabled} visqEnabled={v.visq_enabled}
           onCancel={() => setOpen(false)}
           onSent={(link) => { setOpen(false); setLastLink(link); vivas.reload(); }} />
       )}
@@ -49,7 +55,10 @@ export function VivaPanel({ documentId }: { documentId: string }) {
                 <tr key={i.id}>
                   <td>{fmtDate(i.created_at)}</td>
                   <td>{kindLabel[i.viva_kind]}</td>
-                  <td><span className="cap">{i.answer_format}</span>{i.camera_required && " with camera"}</td>
+                  <td>
+                    <span className="cap">{i.answer_format}</span>{i.camera_required && " with camera"}
+                    {i.followups_enabled && <div className="muted small">with Visq follow-ups</div>}
+                  </td>
                   <td><Status value={i.status} />{i.last_error && <div className="muted small">{i.last_error}</div>}</td>
                   <td>{i.answered ?? 0} of {i.questions ?? 0} answered</td>
                   <td>
@@ -95,9 +104,12 @@ function InvitationActions({ id, status, onDone }: { id: string; status: string;
   );
 }
 
-function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
+function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
   caseId: string;
+  /** Transcription of spoken answers. */
   aiEnabled: boolean;
+  /** Visq question drafts and follow-ups. */
+  visqEnabled: boolean;
   onCancel: () => void;
   onSent: (link: string) => void;
 }) {
@@ -105,6 +117,9 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
   const [kind, setKind] = useState<"style" | "reasoning">("reasoning");
   const [format, setFormat] = useState<"spoken" | "typed">("spoken");
   const [camera, setCamera] = useState(true);
+  const [followups, setFollowups] = useState(visqEnabled);
+  // Follow-ups are decided from the answer, so spoken answers need transcription.
+  const followupsPossible = visqEnabled && (format === "typed" || aiEnabled);
   const [questions, setQuestions] = useState<DraftQuestion[]>([]);
   const [provider, setProvider] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -115,7 +130,7 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
     setError(null);
     try {
       const r = await api<{ provider: string; questions: DraftQuestion[] }>(`/cases/${caseId}/viva-drafts`, {
-        method: "POST", body: JSON.stringify({ kind, count: 4 }),
+        method: "POST", body: JSON.stringify({ kind, count: visqEnabled ? 5 : 4 }),
       });
       setQuestions(r.questions);
       setProvider(r.provider);
@@ -147,7 +162,11 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
           deadline_days: Number(form.get("deadline_days")),
           prep_seconds: Number(form.get("prep_seconds")),
           answer_seconds: Number(form.get("answer_seconds")),
-          questions: questions.map((q) => ({ text: q.text, passage: q.passage || null, source: q.source })),
+          questions: questions.map((q) => ({
+            text: q.text, passage: q.passage || null, source: q.source,
+            qtype: q.qtype ?? null, reviewer_note: q.reviewer_note ?? null,
+          })),
+          followups: followupsPossible && followups,
         }),
       });
       onSent(r.test_link);
@@ -178,6 +197,20 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
             </span>
           </label>
         )}
+        {visqEnabled && (
+          <label className="viva-camera-option">
+            <input type="checkbox" checked={followupsPossible && followups} disabled={!followupsPossible}
+              onChange={(e) => setFollowups(e.target.checked)} />
+            <span>
+              Let Visq ask one follow-up after each answer
+              <small>
+                {followupsPossible
+                  ? "Only when an answer gives no reason or stays generic. Follow-ups are not approved in advance; the report labels them and shows why each was asked."
+                  : "Needs transcription for spoken answers, which is switched off."}
+              </small>
+            </span>
+          </label>
+        )}
       </div>
 
       <div className="viva-questions">
@@ -185,7 +218,7 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
           <h3>Questions</h3>
           <span>
             <button type="button" className="btn secondary" onClick={draft} disabled={busy !== null}>
-              {busy === "draft" ? "Drafting…" : aiEnabled ? "Draft questions from the essay" : "Use template questions"}
+              {busy === "draft" ? "Visq is reading the essay…" : visqEnabled ? "Draft questions with Visq" : "Use template questions"}
             </button>{" "}
             <button type="button" className="btn secondary" disabled={questions.length >= 8}
               onClick={() => setQuestions((qs) => [...qs, { text: "", passage: null, source: "reviewer" }])}>
@@ -193,25 +226,32 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
             </button>
           </span>
         </div>
-        {aiEnabled && provider && provider !== "templates" && (
+        {provider === "visq" && (
           <p className="note small">
-            Drafted by external AI ({provider}) from the submission. Test data only. Check and edit every question
-            before sending; each passage was checked to appear in the essay.
+            Written by Visq from the essay&apos;s own argument: trade-offs, what-ifs and new cases that the author can
+            reason through and a reader of the essay can&apos;t simply look up. The essay went to an outside model with
+            zero data retention. Test data only. Check and edit every question before sending.
           </p>
         )}
-        {!aiEnabled && <p className="muted small">External AI is off, so drafts come from the template bank without passages.</p>}
+        {!visqEnabled && <p className="muted small">Visq is off, so drafts come from the template bank without passages.</p>}
         {questions.length === 0 && <p className="muted small">Draft questions or add your own (up to 8).</p>}
         <ol className="viva-question-list">
           {questions.map((q, i) => (
             <li key={i}>
-              <Field label={`Question ${i + 1}`} hint={sourceLabel[q.source]}>
+              <Field label={`Question ${i + 1}`}
+                hint={[sourceLabel[q.source], q.qtype ? qtypeLabel[q.qtype] ?? q.qtype : null].filter(Boolean).join(" · ")}>
                 <textarea rows={2} required minLength={10} maxLength={400} value={q.text}
                   onChange={(e) => update(i, { text: e.target.value })} />
               </Field>
               <Field label="Passage from the essay (optional)" hint="Shown to the student with the question; must be copied exactly from the submission">
-                <textarea rows={2} maxLength={600} value={q.passage ?? ""}
+                <textarea rows={2} maxLength={1000} value={q.passage ?? ""}
                   onChange={(e) => update(i, { passage: e.target.value || null })} />
               </Field>
+              {q.reviewer_note && (
+                <p className="viva-reviewer-note small">
+                  <strong>What a good answer covers</strong> (for you only): {q.reviewer_note}
+                </p>
+              )}
               <span className="viva-question-tools">
                 <button type="button" className="link" disabled={i === 0} onClick={() => move(i, -1)}>Move up</button>
                 <button type="button" className="link" disabled={i === questions.length - 1} onClick={() => move(i, 1)}>Move down</button>

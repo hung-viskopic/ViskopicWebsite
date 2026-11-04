@@ -3,6 +3,8 @@
 Rules enforced here, on the server, so a modified browser can't get round them:
 - One question at a time. The next question is released only after the current one is answered or its time is
   up, so questions can't be read ahead and there is no going back.
+- Follow-ups (Visq): after a main question is answered, the next release waits until the worker has decided on
+  one optional follow-up, at most `viva_followup_wait_seconds`, then moves on without one.
 - Each question's deadline is measured on the server from its release (preparation + answer time). Answers
   arriving after the deadline plus a short grace period are rejected and recorded as a late write.
 - One browser session at a time. Opening the link on another device takes the session over; the first device
@@ -110,12 +112,14 @@ def intro(token: str):
             audit.record(conn, None, "viva.opened", "viva_invitation", inv_id, institution_id=iid, actor_label="student")
             inv["status"] = "opened"
         name = conn.execute("SELECT name FROM institutions WHERE id = %s", (iid,)).fetchone()["name"]
-        n = conn.execute("SELECT count(*) AS n FROM viva_questions WHERE invitation_id = %s", (inv_id,)).fetchone()["n"]
+        n = conn.execute("SELECT count(*) AS n FROM viva_questions WHERE invitation_id = %s AND parent_id IS NULL",
+                         (inv_id,)).fetchone()["n"]
     return {
         "institution_name": name, "status": inv["status"], "message": CLOSED.get(inv["status"]),
         "kind": inv["viva_kind"], "answer_format": inv["answer_format"], "question_count": n,
         "prep_seconds": inv["prep_seconds"], "answer_seconds": inv["answer_seconds"],
         "deadline_at": inv["deadline_at"], "is_test": inv["is_test"], "camera_required": inv["camera_required"],
+        "followups": inv["followups_enabled"],
         "transcribed": inv["answer_format"] == "spoken" and ai.enabled(),
     }
 
@@ -147,12 +151,12 @@ def start(token: str):
 
 
 def _current(conn: Connection, inv_id: UUID) -> dict | None:
-    """The most recently released question, with its answer state."""
+    """The most recently released question (main or follow-up), with its answer state."""
     return conn.execute(
-        "SELECT q.id, q.position, q.text_ciphertext, q.passage_ciphertext, rl.released_at, rl.due_at, "
+        "SELECT q.id, q.position, q.parent_id, q.text_ciphertext, q.passage_ciphertext, rl.released_at, rl.due_at, "
         "a.id AS answered FROM viva_question_releases rl JOIN viva_questions q ON q.id = rl.question_id "
         "LEFT JOIN viva_responses a ON a.question_id = q.id WHERE rl.invitation_id = %s "
-        "ORDER BY q.position DESC LIMIT 1", (inv_id,)).fetchone()
+        "ORDER BY rl.released_at DESC, q.parent_id IS NOT NULL DESC LIMIT 1", (inv_id,)).fetchone()
 
 
 def _question_out(conn: Connection, iid: UUID, inv: dict, q: dict, total: int) -> dict:
@@ -161,6 +165,7 @@ def _question_out(conn: Connection, iid: UUID, inv: dict, q: dict, total: int) -
         "done": False,
         "question": {
             "id": q["id"], "position": q["position"], "total": total,
+            "followup": q.get("parent_id") is not None,
             "text": crypto.decrypt(dek, q["text_ciphertext"], f"viva_question:{q['id']}").decode(),
             "passage": crypto.decrypt(dek, q["passage_ciphertext"], f"viva_passage:{q['id']}").decode()
                        if q["passage_ciphertext"] else None,
@@ -177,7 +182,7 @@ def next_question(token: str, x_viva_session: str | None = Header(default=None))
     with tenant_tx(iid) as conn:
         inv = _load(conn, inv_id, lock=True)
         _session(conn, inv, x_viva_session)
-        total = conn.execute("SELECT count(*) AS n FROM viva_questions WHERE invitation_id = %s",
+        total = conn.execute("SELECT count(*) AS n FROM viva_questions WHERE invitation_id = %s AND parent_id IS NULL",
                              (inv_id,)).fetchone()["n"]
         cur = _current(conn, inv_id)
         if cur and not cur["answered"]:
@@ -186,17 +191,30 @@ def next_question(token: str, x_viva_session: str | None = Header(default=None))
             conn.execute("INSERT INTO viva_responses (institution_id, invitation_id, question_id, kind) "
                          "VALUES (%s,%s,%s,'skipped')", (iid, inv_id, cur["id"]))
             _event(conn, iid, inv_id, "question_timed_out", cur["id"])
+        if cur:
+            follow = viva.followup_state(conn, iid, inv, cur)
+            if follow == "wait":
+                if not conn.execute("SELECT 1 FROM viva_session_events WHERE question_id = %s AND kind = "
+                                    "'followup_waiting'", (cur["id"],)).fetchone():
+                    _event(conn, iid, inv_id, "followup_waiting", cur["id"])
+                return {"done": False, "waiting": True, "retry_after_ms": 2000, "total": total}
+            if follow is not None:
+                return _release(conn, iid, inv, follow, total)
         pos = (cur["position"] if cur else 0) + 1
-        q = conn.execute("SELECT id, position, text_ciphertext, passage_ciphertext FROM viva_questions "
-                         "WHERE invitation_id = %s AND position = %s", (inv_id, pos)).fetchone()
+        q = conn.execute("SELECT id, position, parent_id, text_ciphertext, passage_ciphertext FROM viva_questions "
+                         "WHERE invitation_id = %s AND position = %s AND parent_id IS NULL", (inv_id, pos)).fetchone()
         if q is None:
             return {"done": True, "total": total}
-        rel = conn.execute(
-            "INSERT INTO viva_question_releases (question_id, institution_id, invitation_id, due_at) "
-            "VALUES (%s,%s,%s, now() + make_interval(secs => %s)) RETURNING released_at, due_at",
-            (q["id"], iid, inv_id, inv["prep_seconds"] + inv["answer_seconds"])).fetchone()
-        _event(conn, iid, inv_id, "question_released", q["id"])
-        return _question_out(conn, iid, inv, {**q, **rel}, total)
+        return _release(conn, iid, inv, q, total)
+
+
+def _release(conn: Connection, iid: UUID, inv: dict, q: dict, total: int) -> dict:
+    rel = conn.execute(
+        "INSERT INTO viva_question_releases (question_id, institution_id, invitation_id, due_at) "
+        "VALUES (%s,%s,%s, now() + make_interval(secs => %s)) RETURNING released_at, due_at",
+        (q["id"], iid, inv["id"], inv["prep_seconds"] + inv["answer_seconds"])).fetchone()
+    _event(conn, iid, inv["id"], "question_released", q["id"])
+    return _question_out(conn, iid, inv, {**q, **rel}, total)
 
 
 def _check_answerable(conn: Connection, iid: UUID, inv: dict, question_id: UUID, fmt: str) -> dict:
@@ -291,6 +309,7 @@ def save_text(token: str, question_id: UUID, body: TypedIn, x_viva_session: str 
                      (rid, iid, inv_id, question_id, crypto.encrypt(dek, body.text.encode(), f"viva_response:{rid}"),
                       taken))
         _event(conn, iid, inv_id, "answer_saved", question_id, {"chars": len(body.text), "seconds_taken": taken})
+        viva.queue_followup(conn, iid, question_id)
     return {"ok": True}
 
 

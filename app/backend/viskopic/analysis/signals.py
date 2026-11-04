@@ -60,12 +60,12 @@ class NotIntegratedPipeline:
 
 def registered_pipelines():
     from .consistency import ConsistencyPipeline
+    from .interchangeability import InterchangeabilityPipeline
 
     return [
         DocumentSignalsPipeline(),
         ConsistencyPipeline(),
-        NotIntegratedPipeline("language", "regeneration",
-                              "The language (β, regeneration) pipeline has not been built yet."),
+        InterchangeabilityPipeline(),     # Pipeline 2 from the model team; takes the β (regeneration) slot
         NotIntegratedPipeline("authenticity", "semantic",
                               "The authenticity (α, semantic) model is still research code with no runnable scorer."),
     ]

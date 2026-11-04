@@ -7,7 +7,7 @@ import pytest
 from viskopic import mailer
 from viskopic.routers import viva_public
 from viskopic.storage import get_storage
-from viskopic.viva import ai
+from viskopic.viva import ai, visq
 from viskopic.viva import service as viva_service
 
 from .conftest import OPERATOR, app_conn, owner_conn
@@ -26,21 +26,11 @@ WEBM_VIDEO = b"\x1a\x45\xdf\xa3" + b"\x00" * 200 + b"V_VP8" + b"\x00" * 200 + b"
 class FakeAI:
     name = "fake"
 
-    def __init__(self):
-        self.essays: list[str] = []
-
-    def chat_json(self, system, user):
-        self.essays.append(user)
-        return {"questions": [
-            {"passage": "I argue that charging works best when the revenue is ring-fenced for buses.",
-             "question": "Why did you decide ring-fencing was the key condition?"},
-            {"passage": "This sentence is not in the essay at all.", "question": "Invented passage?"},
-            {"passage": "Critics reply that   charges fall hardest on low-income drivers who have no alternative.",
-             "question": "How would you answer the critics you mention here?"},
-        ]}
+    def __init__(self, text: str = "Well, I chose ring-fencing because..."):
+        self.text = text
 
     def transcribe(self, audio, mime_type):
-        return {"text": "Well, I chose ring-fencing because...", "duration": 20.0,
+        return {"text": self.text, "duration": 20.0,
                 "segments": [{"start": 2.5, "end": 9.0, "text": "Well, I chose"},
                              {"start": 13.0, "end": 19.0, "text": "ring-fencing because"}]}
 
@@ -65,6 +55,24 @@ def fake_ai(monkeypatch):
     ai.set_provider(None)
     monkeypatch.delenv("VISKOPIC_ALLOW_EXTERNAL_AI")
     monkeypatch.delenv("VISKOPIC_VIVA_AI_PROVIDER")
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def fake_visq(monkeypatch):
+    """Visq with its own offline stand-in model (vendor/visq_v2/visq/fake.py): no network, no spend."""
+    monkeypatch.setenv("VISKOPIC_ALLOW_EXTERNAL_AI", "true")
+    from viskopic.config import get_settings
+    get_settings.cache_clear()
+    clients = []
+
+    def factory():
+        c = visq.modules().fake.FakeClient()
+        clients.append(c)
+        return c
+    visq.set_client_factory(factory)
+    yield clients
+    visq.set_client_factory(None)
     get_settings.cache_clear()
 
 
@@ -122,17 +130,32 @@ def test_drafts_use_templates_when_ai_is_off(client, tenant_factory):
     assert client.post(f"/api/cases/{case_id}/viva-drafts", headers=viewer, json={"kind": "style"}).status_code == 403
 
 
-def test_ai_drafts_keep_only_passages_found_in_the_essay(client, tenant_factory, fake_ai):
+def test_visq_drafts_questions_with_passages_and_reviewer_notes(client, tenant_factory, fake_visq):
     t = tenant_factory()
-    _, case_id, reviewer, _ = make_case(client, t)
+    _, case_id, reviewer, viewer = make_case(client, t)
     r = client.post(f"/api/cases/{case_id}/viva-drafts", headers=reviewer, json={"kind": "reasoning", "count": 4})
     assert r.status_code == 200, r.text
-    qs = r.json()["questions"]
-    assert r.json()["provider"] == "fake"
-    assert [q["source"] for q in qs] == ["ai_draft", "ai_draft"]          # the invented passage was dropped
-    assert qs[1]["passage"].startswith("Critics reply that charges")       # whitespace tolerated, essay text kept
-    assert ESSAY[qs[0]["passage_start"]:qs[0]["passage_end"]] == qs[0]["passage"]
-    assert "<essay>" in fake_ai.essays[0] and "ring-fenced" in fake_ai.essays[0]
+    body = r.json()
+    assert body["provider"] == "visq" and body["engine"].startswith("visq q1.20 offline stand-in (3d631d8)")
+    qs = body["questions"]
+    assert 1 <= len(qs) <= 4 and all(q["source"] == "visq" for q in qs)
+    assert {q["qtype"] for q in qs} <= {"tradeoff", "limit", "case"}
+    assert all(q["reviewer_note"] for q in qs)
+    for q in qs:                         # passages are the submission's own text, found again in it
+        if q["passage"]:
+            assert ESSAY[q["passage_start"]:q["passage_end"]] == q["passage"]
+    # Visq saw the essay as data inside tags, and nothing was cached to disk.
+    assert any("<essay>" in u for _, u in fake_visq[0].inputs)
+    assert not (visq.VENDOR_DIR / ".visq_cache").exists()
+    assert client.post(f"/api/cases/{case_id}/viva-drafts", headers=viewer, json={"kind": "style"}).status_code == 403
+
+
+def test_vendored_visq_is_unchanged():
+    for name, want in visq.FILE_SHA256.items():
+        import hashlib
+        assert hashlib.sha256((visq.VENDOR_DIR / "visq" / name).read_bytes()).hexdigest() == want
+    m = visq.modules()
+    assert m.config.REQUIRE_ZDR and m.config.PROVIDER_PREFS == {"zdr": True}
 
 
 def test_invitation_rejects_passage_not_in_submission(client, tenant_factory):
@@ -191,7 +214,8 @@ def test_spoken_viva_end_to_end(client, tenant_factory, mail, fake_ai):
     assert intro["status"] == "opened" and intro["question_count"] == 2 and intro["answer_format"] == "spoken"
     assert intro["transcribed"] is True
     assert set(intro) == {"institution_name", "status", "message", "kind", "answer_format", "question_count",
-                          "prep_seconds", "answer_seconds", "deadline_at", "is_test", "transcribed", "camera_required"}
+                          "prep_seconds", "answer_seconds", "deadline_at", "is_test", "transcribed", "camera_required",
+                          "followups"}
 
     # Nothing can be written before starting.
     assert pub(client, "POST", tok, "/next").status_code == 409
@@ -439,3 +463,143 @@ def test_video_track_detection():
     mp4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 40 + b"hdlr" + b"\x00" * 8 + b"vide" + b"\x00" * 50
     assert viva_service.has_video_track(mp4, "audio/mp4")
     assert viva_service.media_type("audio/mp4", True) == "video/mp4"
+
+
+# ------------------------------------------------------------------ Visq follow-ups
+
+
+def visq_questions(client, reviewer, case_id, n=2):
+    r = client.post(f"/api/cases/{case_id}/viva-drafts", headers=reviewer, json={"kind": "reasoning", "count": n})
+    assert r.status_code == 200, r.text
+    return [{k: q[k] for k in ("text", "passage", "source", "qtype", "reviewer_note")} for q in r.json()["questions"]]
+
+
+SHORT = "It depends."
+LONG = ("I think the conditions matter most here because the revenue only helps buses if the council protects it "
+        "for a long time and the road space freed by the charge is not taken back by other uses later on.")
+
+
+def test_typed_viva_with_visq_followups(client, tenant_factory, fake_visq):
+    t = tenant_factory()
+    doc_id, case_id, reviewer, viewer = make_case(client, t)
+    qs = visq_questions(client, reviewer, case_id)
+    inv = invite(client, reviewer, case_id, fmt="typed", questions=qs, followups=True)
+    tok = token_of(inv["test_link"])
+    intro = pub(client, "GET", tok).json()
+    assert intro["followups"] is True and intro["question_count"] == 2
+    session = pub(client, "POST", tok, "/start").json()["session"]
+
+    q1 = pub(client, "POST", tok, "/next", session).json()["question"]
+    assert q1["position"] == 1 and q1["followup"] is False and q1["total"] == 2
+    assert "reviewer_note" not in q1 and "qtype" not in q1          # the student never sees the answer key
+    assert pub(client, "PUT", tok, f"/answers/{q1['id']}/text", session, json={"text": SHORT}).status_code == 200
+
+    # The decision isn't made yet: the page is told to wait, and cannot skip ahead.
+    w = pub(client, "POST", tok, "/next", session).json()
+    assert w["waiting"] is True and w["done"] is False and "question" not in w
+    drain()                                                           # Visq decides (the stand-in asks after a short answer)
+    f1 = pub(client, "POST", tok, "/next", session).json()["question"]
+    assert f1["followup"] is True and f1["position"] == 1 and f1["passage"] is None
+    assert pub(client, "PUT", tok, f"/answers/{f1['id']}/text", session, json={"text": LONG}).status_code == 200
+
+    # A follow-up gets no follow-up of its own: straight on to question 2.
+    q2 = pub(client, "POST", tok, "/next", session).json()["question"]
+    assert q2["position"] == 2 and q2["followup"] is False
+    assert pub(client, "PUT", tok, f"/answers/{q2['id']}/text", session, json={"text": LONG}).status_code == 200
+    drain()                                                           # detailed answer: Visq moves on
+    assert pub(client, "POST", tok, "/next", session).json() == {"done": True, "total": 2}
+    assert pub(client, "POST", tok, "/submit", session).status_code == 200
+
+    rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
+    assert rep["invitation"]["followups_enabled"] is True
+    assert rep["invitation"]["question_engine"].startswith("visq q1.20")
+    a, fa, b = rep["questions"]
+    assert a["source"] == "visq" and a["reviewer_note"] and a["qtype"] in ("tradeoff", "limit", "case")
+    assert a["followup_decision"]["action"] == "follow_up" and a["followup_decision"]["reason"] == "model"
+    assert a["followup_decision"]["why"]                              # Visq's reason, for the reviewer only
+    assert fa["source"] == "visq_followup" and fa["parent_id"] == a["id"] and fa["typed_answer"] == LONG
+    assert b["followup_decision"]["action"] == "move_on" and b["followup_decision"]["reason"] == "model"
+    assert rep["session"]["second_sessions"] == 0
+
+    with owner_conn() as c:
+        actions = [r[0] for r in c.execute("SELECT action FROM audit_log WHERE institution_id = %s "
+                                           "AND action = 'viva.followup_decided'", (t.id,)).fetchall()]
+        why = bytes(c.execute("SELECT why_ciphertext FROM viva_followup_decisions WHERE action = 'follow_up' "
+                              "AND institution_id = %s", (t.id,)).fetchone()[0])
+        with pytest.raises(psycopg.errors.RaiseException):
+            c.execute("UPDATE viva_followup_decisions SET action = 'move_on'")
+    assert len(actions) == 2 and b"fake" not in why                   # the reason is encrypted at rest
+
+    # Another institution sees none of it.
+    other = tenant_factory("Other")
+    with app_conn() as c:
+        c.execute("SELECT set_config('app.institution_id', %s, false)", (other.id,))
+        assert c.execute("SELECT count(*) FROM viva_followup_decisions").fetchone()[0] == 0
+        c.execute("SELECT set_config('app.institution_id', '', false)")
+
+
+def test_followup_wait_times_out_and_skips_need_no_model(client, tenant_factory, fake_visq, monkeypatch):
+    t = tenant_factory()
+    _, case_id, reviewer, viewer = make_case(client, t)
+    inv = invite(client, reviewer, case_id, fmt="typed", questions=visq_questions(client, reviewer, case_id),
+                 followups=True)
+    tok = token_of(inv["test_link"])
+    session = pub(client, "POST", tok, "/start").json()["session"]
+    q1 = pub(client, "POST", tok, "/next", session).json()["question"]
+    assert pub(client, "PUT", tok, f"/answers/{q1['id']}/text", session, json={"text": SHORT}).status_code == 200
+    monkeypatch.setenv("VISKOPIC_VIVA_FOLLOWUP_WAIT_SECONDS", "0")
+    from viskopic.config import get_settings
+    get_settings.cache_clear()
+    # The worker never ran: the student is not kept waiting past the limit.
+    q2 = pub(client, "POST", tok, "/next", session).json()["question"]
+    assert q2["position"] == 2 and q2["followup"] is False
+    drain()                                   # the late job finds a decision already made and adds nothing
+    with owner_conn() as c:
+        assert c.execute("SELECT count(*) FROM viva_questions WHERE invitation_id = %s AND parent_id IS NOT NULL",
+                         (inv["id"],)).fetchone()[0] == 0
+    # Timed out without an answer: "no answer", no model call.
+    real_now = viva_service.now
+    monkeypatch.setattr(viva_service, "now", lambda: real_now() + timedelta(minutes=10))
+    assert pub(client, "POST", tok, "/next", session).json()["done"] is True
+    monkeypatch.setattr(viva_service, "now", real_now)
+    rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
+    assert [q["followup_decision"]["reason"] for q in rep["questions"]] == ["timeout", "no_answer"]
+
+
+def test_spoken_followup_waits_for_the_transcript(client, tenant_factory, fake_visq, monkeypatch):
+    f = FakeAI(text=SHORT)
+    monkeypatch.setenv("VISKOPIC_VIVA_AI_PROVIDER", "fake")
+    from viskopic.config import get_settings
+    get_settings.cache_clear()
+    ai.set_provider(f)
+    try:
+        t = tenant_factory()
+        _, case_id, reviewer, viewer = make_case(client, t)
+        inv = invite(client, reviewer, case_id, questions=visq_questions(client, reviewer, case_id, n=1),
+                     followups=True)
+        tok = token_of(inv["test_link"])
+        session = pub(client, "POST", tok, "/start").json()["session"]
+        q1 = pub(client, "POST", tok, "/next", session).json()["question"]
+        assert pub(client, "PUT", tok, f"/answers/{q1['id']}/audio", session, content=WEBM).status_code == 200
+        assert pub(client, "POST", tok, "/next", session).json()["waiting"] is True
+        drain()                                # transcription, then the follow-up decision from the transcript
+        f1 = pub(client, "POST", tok, "/next", session).json()["question"]
+        assert f1["followup"] is True
+        assert pub(client, "PUT", tok, f"/answers/{f1['id']}/audio", session, content=WEBM).status_code == 200
+        assert pub(client, "POST", tok, "/next", session).json()["done"] is True
+        drain()
+        rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
+        assert [q["source"] for q in rep["questions"]] == ["visq", "visq_followup"]
+        assert all(q["transcript"]["text"] == SHORT for q in rep["questions"])
+    finally:
+        ai.set_provider(None)
+        get_settings.cache_clear()
+
+
+def test_followups_need_visq_and_transcription(client, tenant_factory):
+    t = tenant_factory()
+    _, case_id, reviewer, _ = make_case(client, t)
+    r = client.post(f"/api/cases/{case_id}/viva-invitations", headers=reviewer, json={
+        "kind": "reasoning", "answer_format": "typed", "email": "s@example.ac.uk", "followups": True,
+        "questions": [{"text": "What is the main argument of your essay?", "source": "template"}]})
+    assert r.status_code == 422 and "Visq" in r.json()["detail"]

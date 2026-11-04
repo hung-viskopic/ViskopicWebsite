@@ -4,6 +4,8 @@ Flow
   baseline document extracted ──► enough baseline? ──► build_profile job ──► encrypted profile artifact
   submission extracted ──► case ──► analyse_case job ──► one analysis run per pipeline + evidence items
   profile becomes ready ──► cases waiting for a baseline are analysed again
+  assignment with a prompt ──► build_comparison_set job (AI essays, prompt only) ──► its cases analysed again
+  every analysis also stores a "combined" run: the model team's either-flags rule over Δ and Pipeline 2
 
 Baseline protection: only documents uploaded as `baseline` ever go into a profile. A submission
 never joins the student's baseline here (that happens only after its case is cleared, later).
@@ -23,7 +25,7 @@ from ..db import tenant_tx
 from ..deps import institution_dek
 from ..storage import get_storage
 from ..viva import service as viva_service
-from . import consistency
+from . import combined, consistency, interchangeability
 from .base import AnalysisContext, PipelineInputError, PipelineResult, ProfileRef, QualityRecord
 from .signals import registered_pipelines
 
@@ -343,6 +345,8 @@ def run_analyse_case(job: dict) -> None:
         profile = current_profile(conn, iid, case["student_id"], "consistency")
         cand_review = latest_reviews(conn, [case["document_id"]]).get(case["document_id"])
         ref_quality = reference_quality(conn, iid, profile.id) if profile else None
+        comparison_set, assignment_prompt, comparison_missing = interchangeability.load_ready_set(
+            conn, case["document_id"])
 
     ctx = AnalysisContext(
         institution_id=iid, case_id=case_id, document_id=case["document_id"],
@@ -352,6 +356,8 @@ def run_analyse_case(job: dict) -> None:
         profiles={"consistency": profile} if profile else {},
         candidate_quality=candidate_quality(cand_review),
         reference_quality=ref_quality,
+        comparison_set=comparison_set, assignment_prompt=assignment_prompt,
+        comparison_missing_reason=comparison_missing,
     )
     results: list[tuple[object, PipelineResult]] = []
     for pipeline in registered_pipelines():
@@ -360,6 +366,11 @@ def run_analyse_case(job: dict) -> None:
         except PipelineInputError as e:
             res = PipelineResult(status="not_eligible", reason=str(e))
         results.append((pipeline, res))
+    # The model team's "either flags" rule over Δ and Pipeline 2, stored as its own run so it is reproducible.
+    by_name = {p.name: r for p, r in results}
+    results.append((_CombinedRun(), combined.combine(
+        by_name.get("consistency"), by_name.get("interchangeability"),
+        demonstration_profile=bool(profile and profile.source == "demonstration"))))
 
     with tenant_tx(iid) as conn:
         if not _still_current(conn, job):
@@ -401,6 +412,11 @@ def run_analyse_case(job: dict) -> None:
         conn.execute("UPDATE jobs SET status = 'done', lease_until = NULL, updated_at = now() WHERE id = %s", (job["id"],))
         record(conn, None, "analysis.completed", "case", case_id, {"status": status, "pipelines": summary},
                institution_id=iid, actor_label="worker")
+
+
+class _CombinedRun:
+    name = "combined"
+    version = combined.VERSION
 
 
 def on_job_failed(conn: Connection, job: dict, message: str) -> None:

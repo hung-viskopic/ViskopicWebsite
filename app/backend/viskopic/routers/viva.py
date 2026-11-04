@@ -12,7 +12,7 @@ from ..access import MANAGE
 from ..auth import Principal, require_user
 from ..deps import institution_dek, tenant_conn
 from ..storage import get_storage
-from ..viva import ai
+from ..viva import ai, visq
 from ..viva import service as viva
 
 router = APIRouter(tags=["viva"])
@@ -49,7 +49,13 @@ def _submission_text(conn: Connection, institution_id: UUID, document_id: UUID) 
 
 INVITATION_COLS = ("id, viva_kind, answer_format, supervision_mode, camera_required, status, deadline_at, prep_seconds, answer_seconds, "
                    "is_test, last_error, created_at, sent_at, opened_at, started_at, submitted_at, revoked_at, "
-                   "revoke_reason, replaces_id")
+                   "revoke_reason, replaces_id, followups_enabled, question_engine")
+
+
+def _assignment_prompt(conn: Connection, document_id: UUID) -> str | None:
+    row = conn.execute("SELECT a.prompt FROM documents d JOIN assignments a ON a.id = d.assignment_id "
+                       "WHERE d.id = %s", (document_id,)).fetchone()
+    return row["prompt"] if row and row["prompt"] else None
 
 
 # ------------------------------------------------------------------ list and draft
@@ -69,37 +75,43 @@ def list_vivas(document_id: UUID, p: Principal = Depends(require_user), conn: Co
         counts = {r["invitation_id"]: r for r in conn.execute(
             "SELECT q.invitation_id, count(*) AS questions, count(a.id) AS answered FROM viva_questions q "
             "LEFT JOIN viva_responses a ON a.question_id = q.id AND a.kind <> 'skipped' "
-            "WHERE q.invitation_id = ANY(%s) GROUP BY q.invitation_id", ([r["id"] for r in rows],)).fetchall()}
+            "WHERE q.invitation_id = ANY(%s) AND q.parent_id IS NULL GROUP BY q.invitation_id",
+            ([r["id"] for r in rows],)).fetchall()}
         for r in invitations:
             c = counts.get(r["id"], {})
             r["questions"], r["answered"] = c.get("questions", 0), c.get("answered", 0)
     return {
         "case": case,
         "can_manage": access.course_access(conn, p, doc["course_id"]) == MANAGE,
-        "ai_enabled": ai.enabled(),
+        "ai_enabled": ai.enabled(),              # transcription of spoken answers
+        "visq_enabled": visq.enabled(),          # Visq questions and follow-ups
         "invitations": invitations,
     }
 
 
 class DraftIn(BaseModel):
     kind: Kind
-    count: int = Field(default=4, ge=1, le=8)
+    count: int = Field(default=5, ge=1, le=8)
 
 
 @router.post("/cases/{case_id}/viva-drafts")
 def draft(case_id: UUID, body: DraftIn, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
-    """Suggested questions, not stored. With external AI on, each is tied to a passage of the submission."""
+    """Suggested questions, not stored. With Visq on, they are written from the submission's argument structure
+    (each tied to a passage where it can be found) and come with a reviewer-only note on what a good answer covers."""
     case = _case(conn, p, case_id, MANAGE)
-    if not ai.enabled():
-        return {"provider": "templates", "questions": [q.__dict__ for q in ai.template_questions(body.kind, body.count)]}
+    if not visq.enabled():
+        return {"provider": "templates", "engine": "templates",
+                "questions": [q.__dict__ | {"qtype": None, "reviewer_note": None}
+                              for q in ai.template_questions(body.kind, body.count)]}
     text = _submission_text(conn, p.institution_id, case["document_id"])
     try:
-        questions = ai.draft_questions(text, body.kind, body.count)
-    except ai.AIUnavailable as e:
+        questions = visq.draft(text, _assignment_prompt(conn, case["document_id"]), body.count)
+    except visq.VisqUnavailable as e:
         raise HTTPException(502, str(e)) from e
+    engine = visq.engine_label()
     audit.record(conn, p, "viva.questions_drafted", "case", case_id,
-                 {"provider": ai.provider().name, "kind": body.kind, "returned": len(questions)})
-    return {"provider": ai.provider().name, "questions": [q.__dict__ for q in questions]}
+                 {"provider": "visq", "engine": engine, "kind": body.kind, "returned": len(questions)})
+    return {"provider": "visq", "engine": engine, "questions": [q.__dict__ for q in questions]}
 
 
 # ------------------------------------------------------------------ invitations
@@ -108,7 +120,9 @@ def draft(case_id: UUID, body: DraftIn, p: Principal = Depends(require_user), co
 class QuestionIn(BaseModel):
     text: str = Field(min_length=10, max_length=ai.MAX_QUESTION_CHARS)
     passage: str | None = Field(default=None, max_length=ai.MAX_PASSAGE_CHARS)
-    source: Literal["ai_draft", "template", "reviewer"] = "reviewer"
+    source: Literal["visq", "template", "reviewer"] = "reviewer"
+    qtype: str | None = Field(default=None, max_length=20)
+    reviewer_note: str | None = Field(default=None, max_length=1000)
 
 
 class InvitationIn(BaseModel):
@@ -120,6 +134,7 @@ class InvitationIn(BaseModel):
     prep_seconds: int = Field(default=30, ge=0, le=300)
     answer_seconds: int = Field(default=120, ge=30, le=600)
     questions: list[QuestionIn] = Field(min_length=1, max_length=8)
+    followups: bool = False       # Visq may ask one follow-up after each answer (needs Visq, and transcription if spoken)
 
 
 @router.post("/cases/{case_id}/viva-invitations", status_code=201)
@@ -130,10 +145,15 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
         raise HTTPException(409, "the case was withdrawn because its document was removed")
     if body.camera and body.answer_format != "spoken":
         raise HTTPException(422, "the camera can only be used with spoken answers")
+    if body.followups and not visq.enabled():
+        raise HTTPException(422, "follow-ups need Visq, which is switched off")
+    if body.followups and body.answer_format == "spoken" and not ai.enabled():
+        raise HTTPException(422, "follow-ups to spoken answers need transcription, which is switched off")
     text = None
     questions = []
     for q in body.questions:
-        item = {"text": q.text.strip(), "source": q.source}
+        item = {"text": q.text.strip(), "source": q.source, "qtype": q.qtype if q.source == "visq" else None,
+                "reviewer_note": q.reviewer_note if q.source == "visq" else None}
         if q.passage and q.passage.strip():
             text = text if text is not None else _submission_text(conn, p.institution_id, case["document_id"])
             span = ai.locate(text, q.passage)
@@ -141,28 +161,33 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
                 raise HTTPException(422, f"this passage is not in the submission: \"{q.passage[:60]}…\"")
             item.update(passage=text[span[0]:span[1]], passage_start=span[0], passage_end=span[1])
         questions.append(item)
+    engine = visq.engine_label() if any(q["source"] == "visq" for q in questions) or body.followups else "reviewer"
     out = _issue(conn, p, case_id, body.kind, body.answer_format, str(body.email), body.deadline_days,
-                 body.prep_seconds, body.answer_seconds, questions, replaces=None, camera=body.camera)
+                 body.prep_seconds, body.answer_seconds, questions, replaces=None, camera=body.camera,
+                 followups=body.followups, engine=engine)
     audit.record(conn, p, "viva.invitation_created", "viva_invitation", out["id"],
                  {"case_id": str(case_id), "kind": body.kind, "format": body.answer_format, "camera": body.camera,
-                  "questions": len(questions), "sources": sorted({q["source"] for q in questions})})
+                  "questions": len(questions), "sources": sorted({q["source"] for q in questions}),
+                  "followups": body.followups, "engine": engine})
     return out
 
 
 def _issue(conn: Connection, p: Principal, case_id: UUID, kind: str, fmt: str, email: str, deadline_days: int,
-           prep: int, answer: int, questions: list[dict], replaces: UUID | None, camera: bool = False) -> dict:
+           prep: int, answer: int, questions: list[dict], replaces: UUID | None, camera: bool = False,
+           followups: bool = False, engine: str | None = None) -> dict:
     dek = institution_dek(conn, p.institution_id)
     token = viva.new_token()
     inv_id = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
     conn.execute(
         "INSERT INTO viva_invitations (id, institution_id, case_id, viva_kind, answer_format, supervision_mode, "
         "camera_required, token_sha256, token_ciphertext, email_ciphertext, deadline_at, prep_seconds, answer_seconds, "
-        "created_by, replaces_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "created_by, replaces_id, followups_enabled, question_engine) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (inv_id, p.institution_id, case_id, kind, fmt,
          "restricted" if fmt == "typed" else "oral_video" if camera else "oral_recorded", camera,
          viva.token_hash(token), crypto.encrypt(dek, token.encode(), f"viva_token:{inv_id}"),
          crypto.encrypt(dek, email.encode(), f"viva_invitation_email:{inv_id}"),
-         viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces))
+         viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces, followups, engine))
     viva.create_questions(conn, dek, p.institution_id, inv_id, questions)
     viva.queue_email(conn, p.institution_id, inv_id)
     # Test vivas only: the reviewer may open the link directly instead of waiting for the email.
@@ -192,10 +217,14 @@ def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     dek = institution_dek(conn, p.institution_id)
     email = crypto.decrypt(dek, inv["email_ciphertext"], f"viva_invitation_email:{invitation_id}").decode()
     questions = []
-    for q in conn.execute("SELECT * FROM viva_questions WHERE invitation_id = %s ORDER BY position",
-                          (invitation_id,)).fetchall():
+    for q in conn.execute("SELECT * FROM viva_questions WHERE invitation_id = %s AND parent_id IS NULL "
+                          "ORDER BY position", (invitation_id,)).fetchall():
         item = {"text": crypto.decrypt(dek, q["text_ciphertext"], f"viva_question:{q['id']}").decode(),
-                "source": q["source"], "passage_start": q["passage_start"], "passage_end": q["passage_end"]}
+                "source": q["source"], "passage_start": q["passage_start"], "passage_end": q["passage_end"],
+                "qtype": q["qtype"]}
+        if q["reviewer_note_ciphertext"]:
+            item["reviewer_note"] = crypto.decrypt(dek, q["reviewer_note_ciphertext"],
+                                                   f"viva_question_note:{q['id']}").decode()
         if q["passage_ciphertext"]:
             item["passage"] = crypto.decrypt(dek, q["passage_ciphertext"], f"viva_passage:{q['id']}").decode()
         questions.append(item)
@@ -203,7 +232,7 @@ def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     remaining = max(1, (inv["deadline_at"] - viva.now()).days + 1) if inv["status"] != "expired" else 7
     out = _issue(conn, p, inv["case_id"], inv["viva_kind"], inv["answer_format"], email, min(remaining, 30),
                  inv["prep_seconds"], inv["answer_seconds"], questions, replaces=invitation_id,
-                 camera=inv["camera_required"])
+                 camera=inv["camera_required"], followups=inv["followups_enabled"], engine=inv["question_engine"])
     audit.record(conn, p, "viva.invitation_resent", "viva_invitation", out["id"], {"replaces": str(invitation_id)})
     return out
 
@@ -217,12 +246,16 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     dek = institution_dek(conn, p.institution_id)
     dec = lambda blob, aad: crypto.decrypt(dek, blob, aad).decode() if blob else None  # noqa: E731
     qs = conn.execute(
-        "SELECT q.id, q.position, q.text_ciphertext, q.passage_ciphertext, q.passage_start, q.passage_end, q.source, "
+        "SELECT q.id, q.position, q.parent_id, q.qtype, q.reviewer_note_ciphertext, "
+        "q.text_ciphertext, q.passage_ciphertext, q.passage_start, q.passage_end, q.source, "
         "rl.released_at, rl.due_at, a.kind AS answer_kind, a.answer_ciphertext, a.id AS response_id, a.seconds_taken, "
         "a.saved_at, r.id AS recording_id, r.status AS recording_status, r.size_bytes, r.has_video, r.mime_type "
         "FROM viva_questions q LEFT JOIN viva_question_releases rl ON rl.question_id = q.id "
         "LEFT JOIN viva_responses a ON a.question_id = q.id LEFT JOIN viva_recordings r ON r.question_id = q.id "
-        "WHERE q.invitation_id = %s ORDER BY q.position", (invitation_id,)).fetchall()
+        "WHERE q.invitation_id = %s ORDER BY q.position, q.parent_id IS NOT NULL", (invitation_id,)).fetchall()
+    decisions = {d["question_id"]: d for d in conn.execute(
+        "SELECT id, question_id, action, reason, why_ciphertext, engine, created_at FROM viva_followup_decisions "
+        "WHERE invitation_id = %s", (invitation_id,)).fetchall()}
     rec_ids = [q["recording_id"] for q in qs if q["recording_id"]]
     transcripts = {t["recording_id"]: t for t in conn.execute(
         "SELECT DISTINCT ON (recording_id) id, recording_id, text_ciphertext, timeline, provider, model, created_at "
@@ -247,7 +280,10 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
         t = transcripts.get(q["recording_id"])
         q_events = [e for e in events if e["question_id"] == q["id"]]
         questions.append({
-            "id": q["id"], "position": q["position"], "source": q["source"],
+            "id": q["id"], "position": q["position"], "source": q["source"], "qtype": q["qtype"],
+            "parent_id": q["parent_id"],
+            "reviewer_note": dec(q["reviewer_note_ciphertext"], f"viva_question_note:{q['id']}"),
+            "followup_decision": _decision_out(decisions.get(q["id"]), dec),
             "text": dec(q["text_ciphertext"], f"viva_question:{q['id']}"),
             "passage": dec(q["passage_ciphertext"], f"viva_passage:{q['id']}"),
             "passage_start": q["passage_start"], "passage_end": q["passage_end"],
@@ -274,6 +310,13 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
         "events": [{k: e[k] for k in ("question_id", "kind", "source", "at")} for e in events],
         "overall": by_q.get(None),
     }
+
+
+def _decision_out(d: dict | None, dec) -> dict | None:
+    if d is None:
+        return None
+    return {"action": d["action"], "reason": d["reason"], "engine": d["engine"], "created_at": d["created_at"],
+            "why": dec(d["why_ciphertext"], f"viva_followup_why:{d['id']}")}
 
 
 def _summarise(events: list[dict]) -> dict:

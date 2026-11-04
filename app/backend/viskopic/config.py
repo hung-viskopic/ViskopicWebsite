@@ -74,8 +74,21 @@ class Settings(BaseSettings):
     allow_external_ai: bool = False
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_question_model: str = "gpt-4o-mini"
     openai_transcribe_model: str = "whisper-1"   # returns segment timestamps for the speech timeline
+
+    # Visq (vendor/visq_v2): writes the main viva questions from the submission's argument structure and
+    # decides one optional follow-up per answer. It sends the essay and the answers to OpenRouter, with zero
+    # data retention required on every call. Same rule as above: needs allow_external_ai, synthetic essays only.
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    visq_model: str | None = None             # default: the model Visq was tuned on (vendor/visq_v2/visq/config.py)
+    # How long the student page waits for a follow-up decision before moving on without one.
+    viva_followup_wait_seconds: int = 90
+
+    # Pipeline 2 (interchangeability): AI comparison essays are generated once per assignment from the
+    # assignment prompt only (no student work leaves the backend). GPT family only for now, using
+    # openai_api_key; results are marked weaker than the evaluated three-family set.
+    p2_generate_comparisons: bool = False
 
 
 @lru_cache

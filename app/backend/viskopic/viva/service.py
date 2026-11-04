@@ -21,7 +21,7 @@ from ..db import tenant_tx
 from ..deps import institution_dek
 from ..mailer import Message, get_mailer
 from ..storage import get_storage
-from . import ai
+from . import ai, visq
 
 log = logging.getLogger("viskopic.viva")
 
@@ -102,15 +102,19 @@ def audio_key(institution_id, recording_id) -> str:
 
 def create_questions(conn: Connection, dek: bytes, institution_id: UUID, invitation_id: UUID,
                      questions: list[dict]) -> None:
+    """The main questions, frozen as sent. Follow-ups are added later by the follow-up job."""
     for pos, q in enumerate(questions, start=1):
         qid = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
+        note = (q.get("reviewer_note") or "").strip()
         conn.execute(
             "INSERT INTO viva_questions (id, institution_id, invitation_id, position, text_ciphertext, "
-            "passage_ciphertext, passage_start, passage_end, source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "passage_ciphertext, passage_start, passage_end, source, qtype, reviewer_note_ciphertext) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (qid, institution_id, invitation_id, pos,
              crypto.encrypt(dek, q["text"].encode(), f"viva_question:{qid}"),
              crypto.encrypt(dek, q["passage"].encode(), f"viva_passage:{qid}") if q.get("passage") else None,
-             q.get("passage_start"), q.get("passage_end"), q["source"]))
+             q.get("passage_start"), q.get("passage_end"), q["source"], q.get("qtype"),
+             crypto.encrypt(dek, note.encode(), f"viva_question_note:{qid}") if note else None))
 
 
 def queue_email(conn: Connection, institution_id: UUID, invitation_id: UUID) -> None:
@@ -245,8 +249,176 @@ def run_transcribe(job: dict) -> None:
                      (job["id"],))
         record(conn, None, "viva.transcribed", "viva_recording", rec_id, {"provider": t.provider, "model": t.model},
                institution_id=iid, actor_label="worker")
+        q = conn.execute("SELECT question_id FROM viva_recordings WHERE id = %s", (rec_id,)).fetchone()
+        queue_followup(conn, iid, q["question_id"])
 
 
 def on_transcribe_failed(conn: Connection, job: dict, message: str) -> None:
     record(conn, None, "viva.transcription_failed", "viva_recording", job["viva_recording_id"], {"error": message},
+           institution_id=job["institution_id"], actor_label="worker")
+    q = conn.execute("SELECT question_id FROM viva_recordings WHERE id = %s", (job["viva_recording_id"],)).fetchone()
+    if q:   # no transcript means no follow-up: let the student move on instead of waiting
+        decide_without_model(conn, job["institution_id"], q["question_id"], "error")
+
+
+# ------------------------------------------------------------------ follow-ups (Visq)
+#
+# After a main question is answered, Visq decides once: ask one follow-up, or move on. The decision is made by
+# the worker (typed answer: straight away; spoken: after transcription) and recorded in viva_followup_decisions.
+# The student page asks for the next question; until a decision exists the server answers "waiting", and after
+# viva_followup_wait_seconds it records "timeout" and moves on, so a slow model never traps a student.
+# Every path that records a decision first locks the invitation row, so the API and the worker never both decide.
+
+
+def _main_question_for_followup(conn: Connection, question_id: UUID) -> dict | None:
+    """The question, if it is a main question in an in-progress invitation with follow-ups on."""
+    return conn.execute(
+        "SELECT q.id, q.invitation_id, q.position, q.parent_id, v.followups_enabled, v.status "
+        "FROM viva_questions q JOIN viva_invitations v ON v.id = q.invitation_id WHERE q.id = %s",
+        (question_id,)).fetchone()
+
+
+def queue_followup(conn: Connection, institution_id: UUID, question_id: UUID) -> bool:
+    q = _main_question_for_followup(conn, question_id)
+    if not q or q["parent_id"] is not None or not q["followups_enabled"] or q["status"] != "in_progress":
+        return False
+    if conn.execute("SELECT 1 FROM viva_followup_decisions WHERE question_id = %s", (question_id,)).fetchone():
+        return False
+    conn.execute("INSERT INTO jobs (institution_id, kind, viva_question_id) VALUES (%s, 'viva_followup', %s)",
+                 (institution_id, question_id))
+    return True
+
+
+def _insert_decision(conn: Connection, institution_id: UUID, invitation_id: UUID, question_id: UUID, action: str,
+                     reason: str, dek: bytes | None = None, why: str | None = None, followup_id: UUID | None = None,
+                     engine: str | None = None) -> bool:
+    did = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
+    row = conn.execute(
+        "INSERT INTO viva_followup_decisions (id, institution_id, invitation_id, question_id, action, reason, "
+        "why_ciphertext, followup_question_id, engine) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "ON CONFLICT (question_id) DO NOTHING RETURNING id",
+        (did, institution_id, invitation_id, question_id, action, reason,
+         crypto.encrypt(dek, why.encode(), f"viva_followup_why:{did}") if (why and dek) else None,
+         followup_id, engine)).fetchone()
+    return row is not None
+
+
+def decide_without_model(conn: Connection, institution_id: UUID, question_id: UUID, reason: str) -> bool:
+    """Record "move on" for a main question (no answer, timeout, error). Locks the invitation first."""
+    q = _main_question_for_followup(conn, question_id)
+    if not q or q["parent_id"] is not None or not q["followups_enabled"]:
+        return False
+    conn.execute("SELECT 1 FROM viva_invitations WHERE id = %s FOR NO KEY UPDATE", (q["invitation_id"],))
+    return _insert_decision(conn, institution_id, q["invitation_id"], question_id, "move_on", reason)
+
+
+def followup_state(conn: Connection, institution_id: UUID, inv: dict, cur: dict) -> dict | str | None:
+    """For a released, answered main question: the follow-up to release next (a question row), "wait", or None
+    (move on). The caller holds the invitation lock."""
+    if not inv["followups_enabled"] or cur.get("parent_id") is not None:
+        return None
+    dec = conn.execute("SELECT action, followup_question_id FROM viva_followup_decisions WHERE question_id = %s",
+                       (cur["id"],)).fetchone()
+    if dec is None:
+        resp = conn.execute("SELECT kind, saved_at FROM viva_responses WHERE question_id = %s",
+                            (cur["id"],)).fetchone()
+        if resp is None or resp["kind"] == "skipped":
+            _insert_decision(conn, institution_id, inv["id"], cur["id"], "move_on", "no_answer")
+            return None
+        if (now() - resp["saved_at"]).total_seconds() < get_settings().viva_followup_wait_seconds:
+            return "wait"
+        _insert_decision(conn, institution_id, inv["id"], cur["id"], "move_on", "timeout")
+        return None
+    if dec["action"] != "follow_up":
+        return None
+    fq = conn.execute(
+        "SELECT q.id, q.position, q.parent_id, q.text_ciphertext, q.passage_ciphertext FROM viva_questions q "
+        "LEFT JOIN viva_question_releases rl ON rl.question_id = q.id WHERE q.id = %s AND rl.question_id IS NULL",
+        (dec["followup_question_id"],)).fetchone()
+    return fq   # None once it has been released
+
+
+def _answer_text(conn: Connection, dek: bytes, question_id: UUID) -> str | None:
+    """The typed answer, or the newest transcript of the spoken one. None when there is nothing to read."""
+    resp = conn.execute("SELECT id, kind, answer_ciphertext FROM viva_responses WHERE question_id = %s",
+                        (question_id,)).fetchone()
+    if resp is None or resp["kind"] == "skipped":
+        return ""
+    if resp["kind"] == "typed":
+        return crypto.decrypt(dek, resp["answer_ciphertext"], f"viva_response:{resp['id']}").decode()
+    t = conn.execute(
+        "SELECT t.id, t.text_ciphertext FROM viva_transcripts t JOIN viva_recordings r ON r.id = t.recording_id "
+        "WHERE r.question_id = %s ORDER BY t.created_at DESC LIMIT 1", (question_id,)).fetchone()
+    return crypto.decrypt(dek, t["text_ciphertext"], f"viva_transcript:{t['id']}").decode() if t else None
+
+
+def run_followup(job: dict) -> None:
+    iid, qid = job["institution_id"], job["viva_question_id"]
+    with tenant_tx(iid) as conn:
+        q = _main_question_for_followup(conn, qid)
+        done = (q is None or q["parent_id"] is not None or not q["followups_enabled"] or q["status"] != "in_progress"
+                or conn.execute("SELECT 1 FROM viva_followup_decisions WHERE question_id = %s", (qid,)).fetchone())
+        if done:
+            conn.execute("UPDATE jobs SET status = 'done', lease_until = NULL, updated_at = now() WHERE id = %s",
+                         (job["id"],))
+            return
+        dek = institution_dek(conn, iid)
+        answer = _answer_text(conn, dek, qid)
+        if answer is None:
+            raise VivaJobError("the spoken answer has no transcript", permanent=True)
+        row = conn.execute("SELECT text_ciphertext, passage_ciphertext FROM viva_questions WHERE id = %s",
+                           (qid,)).fetchone()
+        question = crypto.decrypt(dek, row["text_ciphertext"], f"viva_question:{qid}").decode()
+        passage = (crypto.decrypt(dek, row["passage_ciphertext"], f"viva_passage:{qid}").decode()
+                   if row["passage_ciphertext"] else None)
+        asked = conn.execute(
+            "SELECT q.id, q.source, q.text_ciphertext FROM viva_questions q JOIN viva_question_releases rl "
+            "ON rl.question_id = q.id WHERE q.invitation_id = %s AND q.id <> %s ORDER BY rl.released_at",
+            (q["invitation_id"], qid)).fetchall()
+        texts = [(a["source"], crypto.decrypt(dek, a["text_ciphertext"], f"viva_question:{a['id']}").decode())
+                 for a in asked]
+
+    if visq.is_empty_answer(answer):
+        action, reason, fq_text, why = "move_on", "no_answer", None, None
+    else:
+        try:
+            d = visq.decide_followup(question, answer, passage,
+                                     earlier_followups=[t for s, t in texts if s == "visq_followup"],
+                                     session_asked=[t for _, t in texts])
+        except visq.VisqUnavailable as e:
+            raise VivaJobError(str(e), permanent=True) from e
+        action, reason, why = d["action"], "model", (d.get("why") or "")[:500]
+        fq_text = d.get("question") if action == "follow_up" else None
+        if action == "follow_up" and not (fq_text and fq_text.strip()):
+            action = "move_on"
+    engine = visq.engine_label()
+
+    with tenant_tx(iid) as conn:
+        current = conn.execute("SELECT attempts FROM jobs WHERE id = %s FOR UPDATE", (job["id"],)).fetchone()
+        if current is None or current["attempts"] != job["attempts"]:
+            return
+        inv = conn.execute("SELECT id, status FROM viva_invitations WHERE id = %s FOR NO KEY UPDATE",
+                           (q["invitation_id"],)).fetchone()
+        decided = conn.execute("SELECT 1 FROM viva_followup_decisions WHERE question_id = %s", (qid,)).fetchone()
+        if inv["status"] == "in_progress" and not decided:
+            fid = None
+            if action == "follow_up":
+                fid = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
+                conn.execute(
+                    "INSERT INTO viva_questions (id, institution_id, invitation_id, position, text_ciphertext, "
+                    "passage_ciphertext, passage_start, passage_end, source, qtype, parent_id) "
+                    "SELECT %s, institution_id, invitation_id, position, %s, NULL, NULL, NULL, 'visq_followup', "
+                    "'followup', id FROM viva_questions WHERE id = %s",
+                    (fid, crypto.encrypt(dek, fq_text.strip().encode(), f"viva_question:{fid}"), qid))
+            _insert_decision(conn, iid, inv["id"], qid, action, reason, dek, why, fid, engine)
+            record(conn, None, "viva.followup_decided", "viva_invitation", inv["id"],
+                   {"question_id": str(qid), "action": action, "reason": reason, "engine": engine},
+                   institution_id=iid, actor_label="worker")
+        conn.execute("UPDATE jobs SET status = 'done', lease_until = NULL, updated_at = now() WHERE id = %s",
+                     (job["id"],))
+
+
+def on_followup_failed(conn: Connection, job: dict, message: str) -> None:
+    decide_without_model(conn, job["institution_id"], job["viva_question_id"], "error")
+    record(conn, None, "viva.followup_failed", "viva_question", job["viva_question_id"], {"error": message[:300]},
            institution_id=job["institution_id"], actor_label="worker")

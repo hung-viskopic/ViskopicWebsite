@@ -166,7 +166,12 @@ def test_enrolled_profile_and_evidence_report(client, tenant_factory):
             assert abs(item["z_score"]) >= 2 and item["baseline_sd"] is not None
 
     assert run(rep, "document_signals")["status"] == "completed"
-    assert run(rep, "language")["status"] == "unavailable"
+    p2 = run(rep, "interchangeability")      # Pipeline 2 took the β slot; no assignment, so nothing to compare with
+    assert p2["status"] == "not_eligible" and "assignment" in p2["reason"]
+    assert not any(r["pipeline"] in ("language", "combined") for r in rep["runs"])
+    assert rep["combined"]["status"] in ("review_recommended", "no_flag")
+    assert rep["combined"]["pipelines_run"] == 1 and rep["combined"]["pipeline2_interchangeability"]["status"] == "unavailable"
+    assert any("Pipeline 2 did not run" in n for n in rep["combined"]["coverage_notes"])
     assert run(rep, "authenticity")["status"] == "unavailable"
 
     # Viewers can read the report; another institution can't see it at all.

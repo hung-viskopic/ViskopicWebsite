@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .. import access, audit, crypto
 from ..access import MANAGE
+from ..analysis import interchangeability
 from ..auth import Principal, require_user
 from ..deps import institution_dek, tenant_conn
 
@@ -158,8 +159,11 @@ class AssignmentIn(BaseModel):
 def list_assignments(course_id: UUID, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
     access.require_course(conn, p, course_id)
     return conn.execute(
-        "SELECT id, title, prompt, genre, due_at, created_at FROM assignments WHERE course_id = %s "
-        "ORDER BY created_at DESC",
+        "SELECT a.id, a.title, a.prompt, a.genre, a.due_at, a.created_at, s.status AS comparison_status, "
+        "s.families AS comparison_families, s.error AS comparison_error FROM assignments a "
+        "LEFT JOIN LATERAL (SELECT status, families, error FROM assignment_comparison_sets "
+        "WHERE assignment_id = a.id ORDER BY created_at DESC LIMIT 1) s ON true "
+        "WHERE a.course_id = %s ORDER BY a.created_at DESC",
         (course_id,),
     ).fetchall()
 
@@ -174,7 +178,30 @@ def create_assignment(course_id: UUID, body: AssignmentIn, p: Principal = Depend
         (p.institution_id, course_id, body.title, body.prompt, body.genre, body.due_at),
     ).fetchone()
     audit.record(conn, p, "assignment.created", "assignment", row["id"], {"course_id": str(course_id)})
-    return row
+    # Pipeline 2: AI comparison essays from the prompt (only the prompt leaves the backend).
+    sid = interchangeability.queue_comparison_set(conn, p.institution_id, row["id"], p.user_id)
+    if sid:
+        audit.record(conn, p, "comparison_set.requested", "assignment", row["id"], {"comparison_set_id": str(sid)})
+    return row | {"comparison_status": "queued" if sid else None}
+
+
+@router.post("/assignments/{assignment_id}/comparison-set", status_code=202)
+def rebuild_comparison_set(assignment_id: UUID, p: Principal = Depends(require_user),
+                           conn: Connection = Depends(tenant_conn)):
+    """(Re)generate the AI comparison essays Pipeline 2 scores this assignment's submissions against."""
+    a = conn.execute("SELECT course_id, prompt FROM assignments WHERE id = %s", (assignment_id,)).fetchone()
+    if a is None or access.course_access(conn, p, a["course_id"]) is None:
+        raise HTTPException(404, "assignment not found")
+    access.require_course(conn, p, a["course_id"], MANAGE)
+    if not (a["prompt"] or "").strip():
+        raise HTTPException(422, "the assignment has no prompt text to generate comparison essays from")
+    if not interchangeability.generation_enabled():
+        raise HTTPException(409, "comparison essay generation is switched off (VISKOPIC_P2_GENERATE_COMPARISONS)")
+    sid = interchangeability.queue_comparison_set(conn, p.institution_id, assignment_id, p.user_id, replace=True)
+    if sid is None:
+        raise HTTPException(409, "comparison essays are already being generated")
+    audit.record(conn, p, "comparison_set.requested", "assignment", assignment_id, {"comparison_set_id": str(sid)})
+    return {"id": sid, "status": "queued"}
 
 
 # ------------------------------------------------------------------ students

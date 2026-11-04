@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ErrorNote, Status } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, useResource } from "@/lib/hooks";
-import type { AnalysisReport, AnalysisRun, ConsistencyMeasurements, EvidenceItem, Span } from "@/lib/types";
+import type { AnalysisReport, AnalysisRun, CombinedPart, CombinedReport, ConsistencyMeasurements, EvidenceItem, Span } from "@/lib/types";
 
 const caseStatus: Record<string, string> = {
   analysing: "Analysing",
@@ -18,6 +18,14 @@ const caseStatus: Record<string, string> = {
 const outcomeLabel: Record<string, string> = {
   "same-author-compatible": "Style compatible with the reference profile",
   "stylistically-unusual": "Stylistically unusual relative to the reference profile",
+  interchangeable: "Interchangeable with AI essays on this assignment",
+  not_interchangeable: "Parts depend on each other more than in AI essays",
+};
+
+const combinedTitle: Record<CombinedReport["status"], string> = {
+  review_recommended: "Review recommended",
+  no_flag: "No flag",
+  insufficient_evidence: "Not enough information",
 };
 
 /** Titles for Δ states that carry no score or verdict (the model team's website contract). */
@@ -83,6 +91,9 @@ function defaultOpen(run: AnalysisRun) {
 /** One line shown in a folded pipeline's header so it can be scanned without opening it. */
 function runSummary(run: AnalysisRun): string {
   const d = run.details;
+  if (run.pipeline === "interchangeability" && run.status === "completed") {
+    return `Score ${formatScore(run.score)} · ${outcomeLabel[run.outcome ?? ""] ?? run.outcome}`;
+  }
   if (run.pipeline === "consistency" && run.status === "completed") {
     const label = outcomeLabel[run.outcome ?? ""] ?? run.outcome ?? "";
     return `Score ${formatScore(run.score)} · ${label}${run.confidence ? ` · ${run.confidence} confidence` : ""}`;
@@ -237,6 +248,8 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
         </p>
       )}
 
+      {r.combined && <CombinedCard c={r.combined} />}
+
       {r.runs.map((run) => (
         <RunCard
           key={run.id}
@@ -343,6 +356,32 @@ function RunCard({ run, open, onToggle, selectedKey, onShow }: {
           </>
         )}
 
+        {run.pipeline === "interchangeability" && run.status === "completed" && (
+          <>
+            <p className="experimental">
+              <span className="status status-medium">Experimental</span>
+              {" "}Compares the essay&apos;s opening with AI essays written to the same assignment prompt. The threshold
+              of 0 is provisional, and some human essays fall below it.
+            </p>
+            <div className="stats">
+              <div className="stat">
+                <p className="label">Interchangeability score</p>
+                <strong>{formatScore(run.score)}</strong>
+                <span className="muted small">Threshold {formatScore(run.threshold)}; higher reads more human</span>
+              </div>
+              <div className="stat">
+                <p className="label">Model label</p>
+                <span className="outcome">{outcomeLabel[run.outcome ?? ""] ?? run.outcome}</span>
+              </div>
+              <div className="stat">
+                <p className="label">Comparison essays</p>
+                <span>{(d.families ?? []).join(", ")}</span>
+                {run.confidence && <span className="block"><Status value={run.confidence} /></span>}
+              </div>
+            </div>
+          </>
+        )}
+
         {run.evidence.length > 0 && (
           <ol className="evidence">
             {run.evidence.map((ev) => {
@@ -359,6 +398,36 @@ function RunCard({ run, open, onToggle, selectedKey, onShow }: {
 
         <p className="muted small">{run.pipeline_version}, {fmtDate(run.created_at)}</p>
       </div>
+    </div>
+  );
+}
+
+/** The model team's "either flags" summary over Δ and Pipeline 2. A routing hint for a person, never a finding. */
+function CombinedCard({ c }: { c: CombinedReport }) {
+  const parts: [string, CombinedPart][] = [
+    ["Δ Consistency (style)", c.pipeline1_consistency],
+    ["Pipeline 2: Interchangeability", c.pipeline2_interchangeability],
+  ];
+  const partStatus = { flagged: "Flagged", not_flagged: "Not flagged", unavailable: "Did not run" } as const;
+  return (
+    <div className={`combined combined-${c.status}`} role="status">
+      <div className="combined-head">
+        <h3>{combinedTitle[c.status]}</h3>
+        <span className="muted small">{c.pipelines_run} of 2 pipelines ran</span>
+      </div>
+      <ul className="combined-parts">
+        {parts.map(([label, p]) => (
+          <li key={label}>
+            <strong>{label}:</strong> {partStatus[p.status]}. {p.explanation ?? p.reason ?? ""}
+          </li>
+        ))}
+      </ul>
+      {c.coverage_notes.length > 0 && (
+        <ul className="combined-notes muted small">
+          {c.coverage_notes.map((n) => <li key={n}>{n}</li>)}
+        </ul>
+      )}
+      <p className="muted small">{c.interpretation_warning} Review is recommended when either pipeline flags; scores are never averaged.</p>
     </div>
   );
 }

@@ -1,3 +1,6 @@
 *.sh text eol=lf
 # Vendored model adapter: keep its exact bytes (we check its SHA-256 at startup).
 app/backend/vendor/consistency_v13/website_adapter.py -text
+# Vendored Visq and Pipeline 2 files: exact bytes, hash-checked before import.
+app/backend/vendor/visq_v2/visq/*.py -text
+app/backend/vendor/interchangeability_p2/viskopic_p2/*.py -text

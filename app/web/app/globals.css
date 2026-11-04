@@ -416,3 +416,17 @@ ul.chips { list-style: none; padding: 0; margin-left: 0; }
 .viva-selfview { width: 160px; height: 120px; object-fit: cover; border-radius: var(--radius); background: var(--navy); transform: scaleX(-1); flex: none; }
 .viva-video { width: 100%; max-width: 480px; border-radius: var(--radius); background: var(--navy); }
 @media (max-width: 520px) { .viva-selfview { width: 112px; height: 84px; } }
+
+/* Combined Δ + Pipeline 2 summary on the evidence report */
+.combined { border: 1px solid var(--line); border-left-width: 4px; border-radius: var(--radius); padding: 12px 16px; margin: 0 0 12px; }
+.combined-review_recommended { border-left-color: var(--amber); background: #fdf8ee; }
+.combined-no_flag { border-left-color: var(--green); }
+.combined-insufficient_evidence { border-left-color: var(--line); background: var(--mist); }
+.combined-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.combined-head h3 { margin: 0 0 6px; font-size: 16px; }
+.combined-parts { margin: 0 0 8px; padding-left: 18px; font-size: 14px; }
+.combined-notes { margin: 0 0 8px; padding-left: 18px; }
+
+/* Visq: reviewer-only note on what a good answer covers */
+.viva-reviewer-note { margin: 4px 0 8px; padding: 8px 12px; background: var(--mist); border-radius: var(--radius); }
+.comparison-set { margin: 4px 0 0; }

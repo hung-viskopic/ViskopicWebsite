@@ -4,11 +4,26 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ErrorNote, Field, PageHeader, Status } from "@/components/ui";
+import { qtypeLabel } from "@/components/VivaPanel";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, useResource } from "@/lib/hooks";
-import type { VivaAssessment, VivaReport, VivaReportQuestion, VivaSignals, VivaTimeline } from "@/lib/types";
+import type { FollowupDecision, VivaAssessment, VivaReport, VivaReportQuestion, VivaSignals, VivaTimeline } from "@/lib/types";
 
 const ratingLabel = { consistent: "Consistent with authorship", unclear: "Unclear", concern: "Concern" } as const;
+const sourceText: Record<string, string> = {
+  visq: "Written by Visq, approved by reviewer",
+  visq_followup: "Follow-up asked by Visq, not approved in advance",
+  ai_draft: "Drafted by AI, approved by reviewer",
+  template: "Template",
+  reviewer: "Written by reviewer",
+};
+const decisionReason: Record<FollowupDecision["reason"], string> = {
+  model: "",
+  no_answer: "no answer to follow up",
+  timeout: "the decision was not ready in time, so the viva moved on",
+  error: "Visq or transcription failed, so the viva moved on",
+  disabled: "follow-ups were off",
+};
 const modeLabel = {
   oral_recorded: "Spoken answers, recorded, no staff present",
   oral_video: "Spoken answers with webcam video, recorded, no staff present. The video was not analysed by software",
@@ -54,6 +69,11 @@ export default function VivaReportPage() {
           <dt>Started</dt><dd>{fmtDate(inv.started_at)}</dd>
           <dt>Submitted</dt><dd>{fmtDate(inv.submitted_at)}</dd>
           <dt>Time per question</dt><dd>{inv.prep_seconds}s to think, {inv.answer_seconds}s to answer</dd>
+          <dt>Questions</dt>
+          <dd>
+            {inv.question_engine ?? "Reviewer"}
+            {inv.followups_enabled ? ", with up to one Visq follow-up per question" : ""}
+          </dd>
           <dt>Switched device or window</dt><dd>{r.session.second_sessions === 0 ? "No" : `${r.session.second_sessions} time(s)`}</dd>
           {inv.revoke_reason && (<><dt>Withdrawn</dt><dd>{fmtDate(inv.revoked_at)}: {inv.revoke_reason}</dd></>)}
         </dl>
@@ -83,11 +103,17 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
   return (
     <section className="card viva-report-q">
       <div className="card-head">
-        <h2>Question {q.position}</h2>
-        <span className="muted small">{q.source === "ai_draft" ? "Drafted by AI, approved by reviewer" : q.source === "template" ? "Template" : "Written by reviewer"}</span>
+        <h2>{q.parent_id ? `Follow-up to question ${q.position}` : `Question ${q.position}`}</h2>
+        <span className="muted small">
+          {sourceText[q.source] ?? q.source}
+          {q.qtype && !q.parent_id && ` · ${qtypeLabel[q.qtype] ?? q.qtype}`}
+        </span>
       </div>
       {q.passage && <blockquote className="viva-passage"><span className="label">Passage shown</span><p>{q.passage}</p></blockquote>}
       <p className="viva-q-text">{q.text}</p>
+      {q.reviewer_note && (
+        <p className="viva-reviewer-note small"><strong>What a good answer covers</strong> (not shown to the student): {q.reviewer_note}</p>
+      )}
 
       {q.answer_kind === null && <p className="muted">Not answered yet.</p>}
       {q.answer_kind === "skipped" && <p className="note">No answer: the time ran out.</p>}
@@ -112,9 +138,20 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
       )}
 
       {q.answer_kind && <Signals s={q.signals} seconds={q.seconds_taken} />}
+      {q.followup_decision && <Decision d={q.followup_decision} />}
       {canAssess && <Assessment invitationId={invitationId} questionId={q.id} current={q.assessment} canAssess onSaved={onSaved} />}
       {!canAssess && q.assessment && <p className="small">Rated: <strong>{ratingLabel[q.assessment.rating]}</strong>{q.assessment.note && `: ${q.assessment.note}`}</p>}
     </section>
+  );
+}
+
+function Decision({ d }: { d: FollowupDecision }) {
+  return (
+    <p className="muted small">
+      {d.action === "follow_up" ? "Visq asked a follow-up" : "No follow-up"}
+      {d.reason !== "model" && `: ${decisionReason[d.reason]}`}
+      {d.why && `. Visq's reason: ${d.why}`}
+    </p>
   );
 }
 

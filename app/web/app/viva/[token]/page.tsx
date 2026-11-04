@@ -21,11 +21,13 @@ type Intro = {
   is_test: boolean;
   transcribed: boolean;
   camera_required: boolean;
+  /** One short follow-up may come after an answer. */
+  followups: boolean;
 };
 
 type Question = {
   done: false;
-  question: { id: string; position: number; total: number; text: string; passage: string | null };
+  question: { id: string; position: number; total: number; followup: boolean; text: string; passage: string | null };
   answer_format: "spoken" | "typed";
   prep_seconds: number;
   answer_seconds: number;
@@ -34,7 +36,8 @@ type Question = {
   server_now: string;
 };
 
-type Next = Question | { done: true; total: number };
+// "waiting": the server is still deciding whether to ask a follow-up; ask again shortly.
+type Next = Question | { done: true; total: number } | { done: false; waiting: true; retry_after_ms: number; total: number };
 type BrowserEvent = { kind: string; question_id?: string; detail?: Record<string, number | boolean> };
 
 class HttpError extends Error {
@@ -78,7 +81,7 @@ function clock(s: number) {
 export default function VivaPage() {
   const { token } = useParams<{ token: string }>();
   const [intro, setIntro] = useState<Intro | null>(null);
-  const [stage, setStage] = useState<"loading" | "intro" | "question" | "finished" | "submitted" | "closed" | "taken">("loading");
+  const [stage, setStage] = useState<"loading" | "intro" | "question" | "waiting" | "finished" | "submitted" | "closed" | "taken">("loading");
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState<Question | null>(null);
   const [total, setTotal] = useState(0);
@@ -158,6 +161,12 @@ export default function VivaPage() {
         setStage("finished");
         return;
       }
+      if ("waiting" in n) {
+        currentQ.current = undefined;
+        setStage("waiting");
+        setTimeout(() => { loadNextRef.current?.(); }, n.retry_after_ms);
+        return;
+      }
       skew.current = new Date(n.server_now).getTime() - Date.now();
       currentQ.current = n.question.id;
       setTotal(n.question.total);
@@ -170,6 +179,8 @@ export default function VivaPage() {
       else setError(err.message);
     }
   }, [call, flush]);
+  const loadNextRef = useRef<(() => void) | null>(null);
+  useEffect(() => { loadNextRef.current = loadNext; }, [loadNext]);
 
   async function begin() {
     setError(null);
@@ -260,6 +271,13 @@ export default function VivaPage() {
             onPasteBlocked={(chars) => track("paste_blocked", { chars })} onSaved={loadNext} onError={setError} />
         )}
         {stage === "question" && error && <p className="error" role="alert">{error}</p>}
+        {stage === "waiting" && (
+          <div className="card narrow" role="status" aria-live="polite">
+            <h1>One moment</h1>
+            <p>Your answer is saved. Preparing the next question…</p>
+            {error && <p className="error" role="alert">{error}</p>}
+          </div>
+        )}
         {stage === "finished" && (
           <div className="card narrow">
             <h1>All questions done</h1>
@@ -283,12 +301,18 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
       <h1>A short follow-up about your coursework</h1>
       <p>
         {intro.institution_name} has asked you to answer {intro.question_count} questions about a recent piece of your
-        coursework. It takes about {Math.max(5, Math.ceil((intro.question_count * perQ) / 60))} minutes. Please complete it by{" "}
+        coursework. It takes about {Math.max(5, Math.ceil((intro.question_count * perQ * (intro.followups ? 1.5 : 1)) / 60))} minutes. Please complete it by{" "}
         {new Date(intro.deadline_at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}.
       </p>
       <h2>How it works</h2>
       <ul>
         <li>Questions appear one at a time. You can&apos;t go back to an earlier question or see the next one early.</li>
+        {intro.followups && (
+          <li>
+            After an answer you may get one short follow-up question about what you just said. It has the same time
+            limit. A follow-up is normal and doesn&apos;t mean anything is wrong.
+          </li>
+        )}
         <li>
           Each question gives you {intro.prep_seconds > 0 ? `${duration(intro.prep_seconds)} to think, then ` : ""}
           {duration(intro.answer_seconds)} to {spoken ? "answer out loud" : "type your answer"}. The time is kept by
@@ -313,6 +337,7 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
         tried to paste, or opened the link on a second device. Staff on your module see this information; it is
         stored encrypted and deleted after the review. These details are only hints for the people reviewing your
         work; none of them decides anything on its own.
+        {intro.followups && " An automated system reads each answer only to choose whether to ask a follow-up. It does not mark your answers."}
       </p>
       {!resuming && (
         <label className="viva-consent">
@@ -430,7 +455,9 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
   return (
     <article className="card viva-question" aria-labelledby="viva-q">
       <div className="viva-question-head">
-        <p className="viva-progress">Question {q.question.position} of {q.question.total}</p>
+        <p className="viva-progress">
+          {q.question.followup ? `Follow-up to question ${q.question.position}` : `Question ${q.question.position} of ${q.question.total}`}
+        </p>
         {camera && stream && stream.getVideoTracks().length > 0 && <SelfView stream={stream} />}
       </div>
       {q.question.passage && (

@@ -13,7 +13,8 @@ export default function CourseDetail() {
   const { me, api } = useAuth();
   const course = useResource<Course>(`/courses/${id}`);
   const students = useResource<Student[]>(`/courses/${id}/enrolments`);
-  const assignments = useResource<Assignment[]>(`/courses/${id}/assignments`);
+  // Polls while AI comparison essays are being generated for an assignment.
+  const assignments = useResource<Assignment[]>(`/courses/${id}/assignments`, 5000);
   const docs = useResource<DocumentRow[]>(`/documents?course_id=${id}`, 4000);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -213,6 +214,7 @@ export default function CourseDetail() {
             <div key={a.id} className="assignment">
               <strong>{a.title}</strong> {a.genre && <span className="chip">{a.genre.replaceAll("_", " ")}</span>}
               {a.prompt && <p className="muted small">{a.prompt}</p>}
+              <ComparisonSet a={a} manage={manage} onChange={assignments.reload} />
             </div>
           ))}
           {manage && (
@@ -227,7 +229,8 @@ export default function CourseDetail() {
                     ))}
                   </select>
                 </Field>
-                <Field label="Prompt (optional)" hint="The question students answered.">
+                <Field label="Prompt (optional)"
+                  hint="The question students answered. Pipeline 2 writes AI comparison essays from this text (only the prompt is sent).">
                   <textarea name="prompt" rows={3} />
                 </Field>
               </ActionForm>
@@ -236,5 +239,39 @@ export default function CourseDetail() {
         </section>
       </div>
     </>
+  );
+}
+
+const comparisonLabel: Record<string, string> = {
+  queued: "AI comparison essays queued",
+  building: "Writing AI comparison essays",
+  ready: "AI comparison essays ready",
+  failed: "AI comparison essays failed",
+};
+
+/** Pipeline 2's comparison essays for one assignment: status, and (re)generate for managers. */
+function ComparisonSet({ a, manage, onChange }: { a: Assignment; manage: boolean; onChange: () => void }) {
+  const { api } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  if (!a.prompt) return null;
+  const st = a.comparison_status;
+  async function build() {
+    setError(null);
+    try {
+      await api(`/assignments/${a.id}/comparison-set`, { method: "POST" });
+      onChange();
+    } catch (e) { setError((e as Error).message); }
+  }
+  return (
+    <p className="small comparison-set">
+      {st ? <Status value={st} /> : null}{" "}
+      {st ? comparisonLabel[st] ?? st : "No AI comparison essays yet"}
+      {st === "ready" && a.comparison_families && ` (${a.comparison_families.join(", ")})`}
+      {st === "failed" && a.comparison_error && <span className="muted"> · {a.comparison_error}</span>}
+      {manage && st !== "queued" && st !== "building" && (
+        <> · <button className="link" onClick={build}>{st === "ready" ? "Regenerate" : "Generate"}</button></>
+      )}
+      <ErrorNote error={error} />
+    </p>
   );
 }

@@ -33,8 +33,13 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 
 - `app/web` — Next.js 16 + React 19 + TypeScript, keycloak-js (Auth Code + PKCE). Port 3000.
 - `app/backend` — Python 3.13, FastAPI (API, port 8000) and `viskopic.worker` (same codebase).
-- `app/backend/viskopic/analysis/` — pipeline contract (`base.py`), Δ adapter (`consistency.py`), document signals
-  and α/β placeholders (`signals.py`), profiles/cases/runs orchestration (`service.py`).
+- `app/backend/viskopic/analysis/` — pipeline contract (`base.py`), Δ adapter (`consistency.py`), Pipeline 2
+  (`interchangeability.py`), the combined either-flags report (`combined.py`), document signals and the α
+  placeholder (`signals.py`), profiles/cases/runs orchestration (`service.py`).
+- `app/backend/vendor/interchangeability_p2/` (Pipeline 2, commit `e99417a`) and `app/backend/vendor/visq_v2/`
+  (Visq viva engine, commit `3d631d8`) — vendored byte-for-byte like V1.3, every file's SHA-256 checked before import
+  (`FILE_SHA256` in `analysis/interchangeability.py` and `viva/visq.py`). Never edit them; see their `VENDORED.md`.
+  Never call the model team's `CombinedScorer` (it bypasses the website adapter); combine finished runs instead.
 - `app/backend/vendor/consistency_v13/` — the teammates' frozen V1.3 style model and their `website_adapter.py`,
   vendored **byte-for-byte**. Never edit, reformat or re-save them (the model hash-checks itself; we check the
   adapter's SHA-256, `ADAPTER_SHA256`). Update by re-copying both and bumping `VENDOR_COMMIT` (+ `ADAPTER_SHA256`)
@@ -87,14 +92,20 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - Δ V1.3 needs ≥8 baseline documents of ≥1,650 usable words each and ≥1,650-word submissions — stricter than the
   product rule (3 essays / 1,500 words). Don't lower these constants: a student configuration must come from the
   model team with its own validation.
+- ✅ Pipeline 2 (interchangeability, `0007_visq_and_p2.sql`): AI comparison essays per assignment from the prompt only
+  (`build_comparison_set` job, GPT family, `VISKOPIC_P2_GENERATE_COMPARISONS`), scored locally, no baseline needed;
+  combined report stored as a `combined` run. Threshold 0 is provisional; label it experimental.
+- ✅ Visq viva questions and follow-ups (6c, `0007_visq_and_p2.sql`, `viskopic/viva/visq.py`): Visq writes the main
+  questions (reviewer approves) and may ask one follow-up per answer (`viva_followup` job, decision recorded in
+  `viva_followup_decisions`, server stops waiting after `viva_followup_wait_seconds`).
 - ✅ Viva MVP (6a/6b, `0005_viva.sql`, `routers/viva.py`, `routers/viva_public.py`, `viskopic/viva/`): reviewer sends
   a viva from a submission; student answers by token link, one server-released question at a time, spoken
   (recorded) or typed (paste blocked), deadlines enforced on the server, one session at a time. Report with
   recording, transcript, speech timeline, signals and per-answer ratings. Mailpit for email. Optional webcam
   recording (`0006_viva_camera.sql`, supervision mode `oral_video`): video for a person to watch, never analysed.
-  14 viva tests.
+  19 viva tests.
 - 🔜 Next: evaluator with versioned θ → live/invigilated supervision → decisions with evidence snapshot →
-  appeals → real α and β pipelines.
+  appeals → real α pipeline; Pipeline 2 Qwen/Gemma families. 57 backend tests in total.
 
 ## Working conventions
 
@@ -110,8 +121,12 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   page allowed the microphone and camera; public endpoints take only the token, resolve it through `viva_resolve_token` and
   return nothing about the case or analysis; timing and question release are decided on the server, never by the
   browser; browser signals are hints, labelled as self-reported; a viva rating is not a decision.
-- `VISKOPIC_ALLOW_EXTERNAL_AI` sends essays and recordings to OpenAI (question drafts, transcription). Synthetic test
-  essays only; false anywhere real student work could be present. Drafted passages must be found verbatim in the
-  essay; the AI never rates answers.
+- `VISKOPIC_ALLOW_EXTERNAL_AI` sends essays and answers to OpenRouter (Visq questions and follow-ups, zero data
+  retention required) and recordings to OpenAI (transcription). Synthetic test essays only; false anywhere real
+  student work could be present. Passages must be found in the essay or are dropped; Visq's extraction cache stays
+  off (`cache=False`); the reviewer note and Visq's follow-up reason are never sent to the student; the AI never
+  rates answers. Follow-ups are the only questions not approved in advance (decision 0009).
+- `VISKOPIC_P2_GENERATE_COMPARISONS` sends only the assignment prompt to OpenAI. Never put student text in a
+  comparison set.
 - Webcam video is for human review only. Never add face recognition, gaze tracking, emotion or object detection to
   it: that would make it biometric processing and high-risk AI monitoring of students (see decision 0008).
