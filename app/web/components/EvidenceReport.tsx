@@ -360,7 +360,8 @@ function RunCard({ run, open, onToggle, selectedKey, onShow }: {
             <p className="experimental">
               <span className="status status-medium">Experimental</span>
               {" "}Compares the essay&apos;s opening with AI essays written to the same assignment prompt. The threshold
-              of 0 is provisional, and some human essays fall below it.
+              of 0 was validated on school essays (about 1 in 10 human essays fall below it); for university essays
+              it is experimental and may flag more human essays.
             </p>
             <div className="stats">
               <div className="stat">

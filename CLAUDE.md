@@ -38,7 +38,7 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   list (`signals.py`), profiles/cases/runs orchestration (`service.py`). In the UI they are **Writing style**
   (Δ) and **AI comparison** (Pipeline 2). α authenticity and β language are dropped (not planned); old runs are
   hidden, never deleted. A flag never sends a viva: reviewers send vivas by hand.
-- `app/backend/vendor/interchangeability_p2/` (Pipeline 2, commit `e99417a`) and `app/backend/vendor/visq_v2/`
+- `app/backend/vendor/interchangeability_p2/` (Pipeline 2 v1.1, commit `9cfe33d`) and `app/backend/vendor/visq_v2/`
   (Visq viva engine, commit `3d631d8`) — vendored byte-for-byte like V1.3, every file's SHA-256 checked before import
   (`FILE_SHA256` in `analysis/interchangeability.py` and `viva/visq.py`). Never edit them; see their `VENDORED.md`.
   Never call the model team's `CombinedScorer` (it bypasses the website adapter); combine finished runs instead.
@@ -97,7 +97,9 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - ✅ Pipeline 2 (interchangeability, `0007_visq_and_p2.sql`): AI comparison essays per assignment from the prompt only
   (`build_comparison_set` job, `VISKOPIC_P2_GENERATE_COMPARISONS`; GPT, plus Qwen/Gemma when `VISKOPIC_P2_OLLAMA_URL`
   is set), scored locally, no baseline needed;
-  combined report stored as a `combined` run. Threshold 0 is provisional; label it experimental.
+  combined report stored as a `combined` run. v1.1 (commit `9cfe33d`): first 250 words in three equal word thirds,
+  at least 150 words. Threshold 0 is validated for school essays only; experimental for university essays, and the
+  report says so.
 - ✅ Visq 2 world-tree vivas (`0008_visq2.sql`, `viskopic/viva/visq.py`): flow `visq2` on an invitation. Visq reads
   the essay (`visq2_prepare` job), then during the viva writes clarifying questions, a timed typed extension and a
   short viva; each answer is fed in by a `visq2_step` job, and after `viva_followup_wait_seconds` the API applies

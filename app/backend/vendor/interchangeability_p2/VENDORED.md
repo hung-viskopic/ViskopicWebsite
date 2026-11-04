@@ -1,8 +1,13 @@
-# Vendored: Pipeline 2, essay interchangeability (frozen release v1)
+# Vendored: Pipeline 2, essay interchangeability (frozen release v1.1)
 
-Source: `hung-viskopic/VISKOPIC_PROJECT`, branch `feat/combined-p1-p2`,
-commit `e99417aa0fb0d7ec90035124a44e3329be5efff0`,
+Source: `hung-viskopic/VISKOPIC_PROJECT`, branch `model/v1-3-mvp-handoff`,
+commit `9cfe33d3f9ef9c3c65ef938be49af7a1fff35d4d`,
 path `services/interchangeability_p2/viskopic_p2/` (all three files, byte-for-byte).
+
+v1.1 changed `scoring.py` only: the first 250 words are split into three equal word thirds (at least 150
+words) instead of v1's sentence-aligned thirds, which needed 9 sentences and rejected 44% of university
+essays. `comparisons.py` and `__init__.py` are identical to v1 (commit `e99417a`; `__init__`'s docstring still
+says v1), so comparison sets stored under v1 still load. Threshold 0 is validated for school essays only.
 
 Guide: `docs/COMBINED_PIPELINE.md` in the source repo (what it measures, thresholds, evidence, limits).
 

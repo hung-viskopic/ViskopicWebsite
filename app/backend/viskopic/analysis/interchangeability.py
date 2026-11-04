@@ -1,18 +1,21 @@
-"""Pipeline 2 — interchangeability, using the frozen release from VISKOPIC_PROJECT (`feat/combined-p1-p2`).
+"""Pipeline 2 — interchangeability, using the frozen release v1.1 from VISKOPIC_PROJECT (`model/v1-3-mvp-handoff`).
 
 The scorer is vendored unchanged in `vendor/interchangeability_p2/viskopic_p2/` (hash-checked before import).
 
 What it measures: in a human essay the opening sets up what follows, so its rarer words come back later. AI
 essays written to the same assignment are close to interchangeable: their openings would fit any of them. The
-score is how much more the essay's opening (first third of its first 250 words) shares with its own
-continuation than the openings of AI essays on the same assignment do. Below 0 the essay is "interchangeable".
+score is how much more the essay's opening (first of three equal word thirds of its first 250 words) shares with
+its own continuation than the openings of AI essays on the same assignment do. Below 0 the essay is
+"interchangeable". v1.1 needs at least 150 words (v1 needed 9 sentences in 250 words and rejected 44% of
+university essays).
 
 What it needs: a comparison set per assignment, generated once from the assignment prompt only. No student
 writing is sent anywhere; scoring is local. It does not need the student's baseline, so it gives a result
 for students who have no profile yet.
 
 How it is presented (the model team's rules): evidence for a reviewer, never a probability, never acted on
-automatically. The threshold of 0 is provisional. GPT-only comparison sets are weaker than the evaluated
+automatically. The threshold of 0 is validated for school essays only (9.7% of human essays flagged) and is
+experimental for university essays (a small internal check flagged more). GPT-only comparison sets are weaker than the evaluated
 three-family set and are labelled so. Statements below come from templates.
 """
 from __future__ import annotations
@@ -36,11 +39,11 @@ from .base import AnalysisContext, EvidenceItem, PipelineResult, Span
 log = logging.getLogger("viskopic.analysis.p2")
 
 VENDOR_DIR = Path(__file__).resolve().parents[2] / "vendor" / "interchangeability_p2"
-VENDOR_COMMIT = "e99417a"           # keep in step with vendor/interchangeability_p2/VENDORED.md
+VENDOR_COMMIT = "9cfe33d"           # keep in step with vendor/interchangeability_p2/VENDORED.md
 FILE_SHA256 = {
     "__init__.py": "b5a637b77931c9255d77c4f692d0873753fc1605d90bede9fa392cd0fde276d5",
     "comparisons.py": "db74fa308b98c8229318b33b88ed74f0a14bd2bc5fb897d955853ff1a2a0210c",
-    "scoring.py": "14b0a8cc1cd6a652b99e395389b9f34daccd9c66336934233514585df4db4e5e",
+    "scoring.py": "1aaa651d77e28fb25633035ceeb3f24eab141ba4e423166ffde9372166cb8a1c",
 }
 OLLAMA_FAMILIES = ("qwen3_14b", "gemma3_27b")   # need p2_ollama_url; the evaluated set is these plus gpt54mini
 
@@ -232,12 +235,18 @@ class InterchangeabilityPipeline:
         res = m.score_essay(ctx.text, comparisons)
         families = sorted(comparisons)
         base = {"threshold": m.THRESHOLD, "families": families, "evaluated_families": list(m.FAMILIES),
-                "provisional_threshold": True}
+                "provisional_threshold": True, "threshold_validated_for": "school essays",
+                "experimental_for": "university essays"}
         if res["status"] != "scored":
-            # About 1 in 5 essays by young writers are unscorable (too few sentences, run-on writing).
-            return PipelineResult(status="not_eligible", details={**base, "p2_status": res["status"]},
-                                  reason="This essay can't be scored for interchangeability: "
-                                         f"{res['reason']}."[:300])
+            details = {**base, "p2_status": res["status"], "p2_reason": res["reason"]}
+            if res["reason"].startswith("candidate:"):
+                # v1.1's only rule for the essay itself: at least MIN_WORDS words.
+                have = len(ctx.text.split())
+                reason = (f"This essay is too short for the AI comparison: it needs at least {m.scoring.MIN_WORDS} "
+                          f"words and has {have}.")
+            else:
+                reason = f"The AI comparison could not run: {res['reason']}."
+            return PipelineResult(status="not_eligible", details=details, reason=reason[:300])
         flagged = bool(res["flag"])
         all_families = set(families) == set(m.FAMILIES)
         details = {**base, "p2_status": "scored", "family_scores": res["family_scores"],
@@ -253,7 +262,7 @@ class InterchangeabilityPipeline:
         m = p2()
         spans: list[Span] = []
         try:
-            opening = m.scoring.split_three(m.scoring.truncate(ctx.text))[0]
+            opening = m.scoring.word_thirds(ctx.text)[0]
             span = _locate(ctx.text, opening)
             if span:
                 spans.append(span)
@@ -268,9 +277,13 @@ class InterchangeabilityPipeline:
             statement = ("The opening of the essay shares more of its specific words with its own continuation "
                          "than the openings of AI-written essays on this assignment do (score {:.2f}, above 0)."
                          ).format(score)
+        items_note = ("The threshold of 0 was validated on school essays, where it flagged about 1 in 10 human "
+                      "essays. For university essays it is experimental and may flag more human essays.")
         items = [EvidenceItem(category="regeneration", kind="interchangeability", statement=statement,
                               observed=score, spans=spans,
-                              details={"threshold": m.THRESHOLD, "family_scores": res["family_scores"]})]
+                              details={"threshold": m.THRESHOLD, "family_scores": res["family_scores"]}),
+                 EvidenceItem(category="regeneration", kind="threshold_validation", statement=items_note,
+                              details={"validated_for": "school essays", "experimental_for": "university essays"})]
         if not all_families:
             items.append(EvidenceItem(
                 category="regeneration", kind="comparison_coverage",

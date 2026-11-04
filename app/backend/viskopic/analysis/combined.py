@@ -2,7 +2,7 @@
 (Pipeline 2, interchangeability). User-facing text uses the plain names; the rule and wording are the model team's.
 
 The rule and the wording are the model team's (`services/viskopic_combined/viskopic_combined/combined.py` in
-VISKOPIC_PROJECT, `feat/combined-p1-p2`, commit e99417a). We re-implement it here instead of calling their
+VISKOPIC_PROJECT, `model/v1-3-mvp-handoff`, commit 9cfe33d; unchanged since e99417a). We re-implement it here instead of calling their
 `CombinedScorer`, because that calls the V1.3 scorer directly and would skip the website adapter and its
 quality-review gate. Our Δ result already went through the adapter; this only combines finished runs.
 
@@ -15,10 +15,12 @@ from __future__ import annotations
 from .base import PipelineResult
 
 SCHEMA = "viskopic-combined.v1"
-VERSION = "combined-either-flags-v1+e99417a"
+VERSION = "combined-either-flags-v1+9cfe33d"
 WARNING = ("Evidence for a human reviewer only. Not a probability and not proof of AI use, authorship, "
            "plagiarism or misconduct. A flag means: look at this essay more closely.")
 ALWAYS_NOTE = "Neither pipeline detects a student's own draft that was only polished or edited by AI."
+P2_THRESHOLD_NOTE = ("The AI comparison's threshold was validated on school essays; for university essays it is "
+                     "experimental and may flag more human essays.")
 
 
 def _p1(res: PipelineResult | None) -> dict:
@@ -60,6 +62,8 @@ def _coverage_notes(p1: dict, p2: dict, all_families: bool) -> list[str]:
         notes.append(f"The AI comparison used only {', '.join(p2['families'])} comparison essays; the evaluated "
                      "configuration uses all of gpt54mini, qwen3_14b, gemma3_27b and is stronger against other "
                      "AI models.")
+    if p2["status"] != "unavailable":
+        notes.append(P2_THRESHOLD_NOTE)
     notes.append(ALWAYS_NOTE)
     return notes
 

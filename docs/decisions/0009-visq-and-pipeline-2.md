@@ -65,3 +65,18 @@ then a short viva whose questions depend on the earlier answers.
   in the worker; if a step is late, the API applies it with Visq's offline heuristics so the student is never stuck.
 - Known limits from the model team at freeze: the real-model path was tried by hand on a few essays; the note's
   markers see wording, not meaning, so a correct answer in other words can read "not evident".
+
+## Addendum: Pipeline 2 v1.1 (commit 9cfe33d)
+
+v1 split the first 250 words into sentence-aligned thirds and needed 9 sentences, so long-sentence university
+writing was often unscorable (a BAWE history essay had 4 sentences in its first 250 words). The model team measured
+v1 rejecting 44% of university essays and 20% of school essays but about 2% of AI essays, and released v1.1: three
+equal word thirds, at least 150 words, validated on a fresh pre-registered PERSUADE sample (coverage 100%, AUROC
+0.786 vs 0.780).
+
+- **Re-vendored `scoring.py` only**; `comparisons.py` and `__init__.py` are unchanged, so stored comparison sets
+  still load. Earlier runs keep their `p2-interchangeability-v1+e99417a` version; new runs are `v1.1+9cfe33d`.
+- **Threshold 0 is validated for school essays only** (9.7% of human essays flagged). For university essays it is
+  experimental (6 of 24 human BAWE essays fell below 0 in a small GPT-only check). Every AI comparison result carries
+  a `threshold_validation` evidence item saying so, and the combined report adds a coverage note whenever P2 ran.
+- An essay under 150 words is *not eligible*, with the reason in plain words.

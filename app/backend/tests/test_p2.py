@@ -50,11 +50,25 @@ def human_like() -> str:
     return " ".join(s)
 
 
+def long_sentences() -> str:
+    """Four very long sentences in the first 250 words, like much history or law writing."""
+    s = ("Ghent introduced its circulation plan in 2017, splitting the centre into sectors joined only by a ring road, "
+         "so that drivers could no longer cross the old town directly and short trips by car became slower than "
+         "cycling, while shopkeepers in the Korenmarkt feared ruin and the local press predicted empty streets within "
+         "a year, a fear that deserves to be taken seriously because a ban that empties a centre has failed.")
+    return " ".join([s] * 5)
+
+
 def disjoint_opening() -> str:
     """An opening that shares nothing with its continuation, while the AI openings do: scores below 0."""
     opening = ["Mountain weather changes quickly above the tree line in early spring.",
                "Walkers carry maps, compasses and spare gloves for that reason.",
-               "Guides check forecasts twice before leaving the valley huts."]
+               "Guides check forecasts twice before leaving the valley huts.",
+               "Snow bridges over glacier streams weaken by noon, so crossings start before sunrise.",
+               "Rope teams keep a steady pace and stop at marked cairns to rest and drink.",
+               "Headlamps, whistles and a foil blanket stay in every rucksack, even on short outings.",
+               "Avalanche bulletins are posted at the hut door each evening during the season.",
+               "Experienced climbers turn back when cloud hides the ridge, whatever the plan said."]
     rest = ai_like(7, 220)
     return " ".join(opening) + " " + rest
 
@@ -77,7 +91,7 @@ def test_vendored_p2_is_unchanged():
     for name, want in interchangeability.FILE_SHA256.items():
         path = interchangeability.VENDOR_DIR / "viskopic_p2" / name
         assert hashlib.sha256(path.read_bytes()).hexdigest() == want
-    assert interchangeability.p2().VERSION == "p2-interchangeability-v1" and interchangeability.p2().THRESHOLD == 0.0
+    assert interchangeability.p2().VERSION == "p2-interchangeability-v1.1" and interchangeability.p2().THRESHOLD == 0.0
 
 
 def test_comparison_set_scoring_and_combined_report(client, tenant_factory, writers):
@@ -98,9 +112,10 @@ def test_comparison_set_scoring_and_combined_report(client, tenant_factory, writ
     assert p2["status"] == "completed", p2
     assert p2["outcome"] == "not_interchangeable" and p2["score"] > 0 and p2["threshold"] == 0.0
     assert p2["confidence"] == "low" and p2["details"]["families"] == ["gpt54mini"]
-    assert p2["pipeline_version"] == "p2-interchangeability-v1+e99417a"
+    assert p2["pipeline_version"] == "p2-interchangeability-v1.1+9cfe33d"
     kinds = [e["kind"] for e in p2["evidence"]]
-    assert kinds == ["interchangeability", "comparison_coverage"]
+    assert kinds == ["interchangeability", "threshold_validation", "comparison_coverage"]
+    assert "experimental" in p2["evidence"][1]["statement"]
     span = p2["evidence"][0]["spans"][0]
     text = client.get(f"/api/documents/{doc_id}/text", headers=reviewer).json()["text"]
     assert text[span["start"]:span["end"]].startswith("Ghent introduced its circulation plan")
@@ -111,6 +126,7 @@ def test_comparison_set_scoring_and_combined_report(client, tenant_factory, writ
     assert c["pipeline1_consistency"]["status"] == "unavailable"
     assert any("The writing-style check did not run" in n for n in c["coverage_notes"])
     assert any("used only gpt54mini" in n for n in c["coverage_notes"])
+    assert any("validated on school essays" in n for n in c["coverage_notes"])
     assert c["interpretation_warning"].startswith("Evidence for a human reviewer only")
 
     # An interchangeable essay is flagged and review is recommended.
@@ -122,6 +138,20 @@ def test_comparison_set_scoring_and_combined_report(client, tenant_factory, writ
     assert p2["outcome"] == "interchangeable" and p2["score"] < 0
     assert rep["combined"]["status"] == "review_recommended"
     assert rep["combined"]["flagged_by"] == ["pipeline2_interchangeability"]
+
+    # v1.1 splits by words, so long-sentence academic writing is scored (v1 needed 9 sentences in 250 words);
+    # the only rule left is at least 150 words.
+    for name, body, scored in (("long.txt", long_sentences(), True), ("short.txt", " ".join(human_like().split()[:120]), False)):
+        r = upload(client, reviewer, course, student, name, body.encode(), role="submission",
+                   provenance="unsupervised", assignment_id=a["id"])
+        drain()
+        rep = client.get(f"/api/documents/{r.json()['id']}/analysis", headers=viewer).json()
+        p2 = next(x for x in rep["runs"] if x["pipeline"] == "interchangeability")
+        if scored:
+            assert p2["status"] == "completed", p2
+        else:
+            assert p2["status"] == "not_eligible"
+            assert p2["reason"] == "This essay is too short for the AI comparison: it needs at least 150 words and has 120."
 
     # The assignment list shows the set; only managers can rebuild it; the comparison essays never contain
     # student text, and another institution sees none of it.
