@@ -90,7 +90,9 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - ✅ Viva MVP (6a/6b, `0005_viva.sql`, `routers/viva.py`, `routers/viva_public.py`, `viskopic/viva/`): reviewer sends
   a viva from a submission; student answers by token link, one server-released question at a time, spoken
   (recorded) or typed (paste blocked), deadlines enforced on the server, one session at a time. Report with
-  recording, transcript, speech timeline, signals and per-answer ratings. Mailpit for email. 12 viva tests.
+  recording, transcript, speech timeline, signals and per-answer ratings. Mailpit for email. Optional webcam
+  recording (`0006_viva_camera.sql`, supervision mode `oral_video`): video for a person to watch, never analysed.
+  14 viva tests.
 - 🔜 Next: evaluator with versioned θ → live/invigilated supervision → decisions with evidence snapshot →
   appeals → real α and β pipelines.
 
@@ -105,9 +107,11 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - `VISKOPIC_ALLOW_DEMO_PROFILES` and `VISKOPIC_ALLOW_UNREVIEWED_CONSISTENCY` must be false anywhere outside local
   development.
 - Viva rules to keep: the student page (`app/web/app/viva/[token]`) sits outside the keycloak wrapper and is the only
-  page allowed the microphone; public endpoints take only the token, resolve it through `viva_resolve_token` and
+  page allowed the microphone and camera; public endpoints take only the token, resolve it through `viva_resolve_token` and
   return nothing about the case or analysis; timing and question release are decided on the server, never by the
   browser; browser signals are hints, labelled as self-reported; a viva rating is not a decision.
 - `VISKOPIC_ALLOW_EXTERNAL_AI` sends essays and recordings to OpenAI (question drafts, transcription). Synthetic test
   essays only; false anywhere real student work could be present. Drafted passages must be found verbatim in the
   essay; the AI never rates answers.
+- Webcam video is for human review only. Never add face recognition, gaze tracking, emotion or object detection to
+  it: that would make it biometric processing and high-risk AI monitoring of students (see decision 0008).

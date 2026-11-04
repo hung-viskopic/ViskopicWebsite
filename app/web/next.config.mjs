@@ -5,8 +5,8 @@ const baseHeaders = [
   { key: "Referrer-Policy", value: "no-referrer" },
 ];
 const noDevices = { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" };
-// The student viva page records spoken answers, so only it may ask for the microphone.
-const vivaDevices = { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=()" };
+// The student viva page records answers, so only it may ask for the microphone and camera.
+const vivaDevices = { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" };
 
 export default {
   output: "standalone",

@@ -20,6 +20,7 @@ type Intro = {
   deadline_at: string;
   is_test: boolean;
   transcribed: boolean;
+  camera_required: boolean;
 };
 
 type Question = {
@@ -53,9 +54,12 @@ function store(key: string, value?: string | null) {
   return null;
 }
 
-function pickMime(): string {
+function pickMime(video: boolean): string {
   if (typeof MediaRecorder === "undefined") return "";
-  for (const m of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"]) {
+  const options = video
+    ? ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"]
+    : ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  for (const m of options) {
     if (MediaRecorder.isTypeSupported(m)) return m;
   }
   return "";
@@ -170,13 +174,23 @@ export default function VivaPage() {
   async function begin() {
     setError(null);
     if (intro?.answer_format === "spoken") {
+      const camera = intro.camera_required;
       try {
-        stream.current = stream.current ?? (await navigator.mediaDevices.getUserMedia({ audio: true }));
+        stream.current = stream.current ?? (await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          // Small and low frame rate: enough for a person to watch, small enough to upload quickly.
+          video: camera ? { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15 }, facingMode: "user" } : false,
+        }));
       } catch {
-        setError("We couldn't use your microphone. Allow microphone access in your browser and try again. "
-          + "If you can't use a microphone, contact your module team for a typed version.");
+        setError(camera
+          ? "We couldn't use your camera and microphone. Allow both in your browser (the icon in the address bar) and "
+            + "try again. If you can't use a camera, contact your module team for an audio-only version."
+          : "We couldn't use your microphone. Allow microphone access in your browser and try again. "
+            + "If you can't use a microphone, contact your module team for a typed version.");
         return;
       }
+      // If the camera is unplugged or switched off during the viva, the reviewer is told.
+      stream.current.getVideoTracks().forEach((t) => { t.onended = () => track("camera_unavailable"); });
     }
     try {
       if (!session.current) {
@@ -241,7 +255,8 @@ export default function VivaPage() {
         )}
         {stage === "intro" && intro && <IntroCard intro={intro} resuming={!!session.current} error={error} onBegin={begin} />}
         {stage === "question" && q && (
-          <QuestionCard key={`${q.question.id}-${loads}`} q={q} skew={skew.current} stream={stream.current} call={call}
+          <QuestionCard key={`${q.question.id}-${loads}`} q={q} skew={skew.current} stream={stream.current}
+            camera={!!intro?.camera_required} call={call}
             onPasteBlocked={(chars) => track("paste_blocked", { chars })} onSaved={loadNext} onError={setError} />
         )}
         {stage === "question" && error && <p className="error" role="alert">{error}</p>}
@@ -279,7 +294,13 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
           {duration(intro.answer_seconds)} to {spoken ? "answer out loud" : "type your answer"}. The time is kept by
           our server, so it continues even if you leave the page.
         </li>
-        {spoken ? (
+        {spoken && intro.camera_required ? (
+          <li>
+            Your camera and microphone record each answer{intro.transcribed ? ", and your words are transcribed automatically" : ""}.
+            Sit in a quiet, well-lit place with your face visible. You will see yourself in a small preview. A member of
+            staff may watch the recording; no software analyses your face or video.
+          </li>
+        ) : spoken ? (
           <li>Your answer is recorded through your microphone{intro.transcribed ? " and transcribed automatically" : ""}. Find a quiet place.</li>
         ) : (
           <li>Type your answer yourself. Pasting text is switched off.</li>
@@ -288,7 +309,7 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
       </ul>
       <h2>What is recorded</h2>
       <p className="small">
-        {spoken ? "Your spoken answers, " : "Your typed answers, "}how long each answer took, and whether you left this page,
+        {spoken && intro.camera_required ? "Video and sound of you while you answer, " : spoken ? "Your spoken answers, " : "Your typed answers, "}how long each answer took, and whether you left this page,
         tried to paste, or opened the link on a second device. Staff on your module see this information; it is
         stored encrypted and deleted after the review. These details are only hints for the people reviewing your
         work; none of them decides anything on its own.
@@ -301,17 +322,25 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
       )}
       {error && <p className="error" role="alert">{error}</p>}
       <button className="btn" disabled={!agreed || busy} onClick={async () => { setBusy(true); await onBegin(); setBusy(false); }}>
-        {busy ? "Starting…" : resuming ? "Continue" : spoken ? "Allow microphone and start" : "Start"}
+        {busy ? "Starting…" : resuming ? "Continue" : spoken && intro.camera_required ? "Allow camera and microphone and start" : spoken ? "Allow microphone and start" : "Start"}
       </button>
       <p className="muted small">If you need extra time or another adjustment, contact your module team before starting.</p>
     </div>
   );
 }
 
-function QuestionCard({ q, skew, stream, call, onPasteBlocked, onSaved, onError }: {
+function SelfView({ stream }: { stream: MediaStream }) {
+  return (
+    <video className="viva-selfview" muted playsInline autoPlay aria-label="Your camera preview"
+      ref={(el) => { if (el && el.srcObject !== stream) el.srcObject = stream; }} />
+  );
+}
+
+function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, onError }: {
   q: Question;
   skew: number;
   stream: MediaStream | null;
+  camera: boolean;
   call: <T>(method: string, path: string, body?: BodyInit, contentType?: string) => Promise<T>;
   onPasteBlocked: (chars: number) => void;
   onSaved: () => void;
@@ -363,14 +392,19 @@ function QuestionCard({ q, skew, stream, call, onPasteBlocked, onSaved, onError 
   // Spoken: recording starts when the answer time starts and stops at the server deadline.
   useEffect(() => {
     if (!spoken || !answering || recorder.current || !stream) return;
-    const mime = pickMime();
-    const r = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const video = camera && stream.getVideoTracks().some((t) => t.readyState === "live");
+    const mime = pickMime(video);
+    const r = new MediaRecorder(stream, {
+      ...(mime ? { mimeType: mime } : {}),
+      audioBitsPerSecond: 32000,
+      ...(video ? { videoBitsPerSecond: 250000 } : {}),
+    });
     chunks.current = [];
     r.ondataavailable = (e) => e.data.size > 0 && chunks.current.push(e.data);
     r.onstop = () => upload(new Blob(chunks.current, { type: r.mimeType || "audio/webm" }));
     r.start(1000);
     recorder.current = r;
-  }, [spoken, answering, stream, upload]);
+  }, [spoken, answering, stream, upload, camera]);
 
   // Time is up: stop recording, or send what has been typed.
   useEffect(() => {
@@ -395,7 +429,10 @@ function QuestionCard({ q, skew, stream, call, onPasteBlocked, onSaved, onError 
 
   return (
     <article className="card viva-question" aria-labelledby="viva-q">
-      <p className="viva-progress">Question {q.question.position} of {q.question.total}</p>
+      <div className="viva-question-head">
+        <p className="viva-progress">Question {q.question.position} of {q.question.total}</p>
+        {camera && stream && stream.getVideoTracks().length > 0 && <SelfView stream={stream} />}
+      </div>
       {q.question.passage && (
         <blockquote className="viva-passage">
           <span className="label">From your work</span>

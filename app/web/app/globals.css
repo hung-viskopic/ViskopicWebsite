@@ -409,3 +409,10 @@ table.compact td, table.compact th { padding: 6px 8px; font-size: 13px; }
 @keyframes viva-pulse { 50% { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .viva-dot { animation: none; } }
 ul.chips { list-style: none; padding: 0; margin-left: 0; }
+.viva-camera-option { display: flex; gap: 10px; align-items: flex-start; align-self: end; font-weight: 600; font-size: 14px; }
+.viva-camera-option input { margin-top: 3px; width: 16px; height: 16px; }
+.viva-camera-option small { display: block; font-weight: 400; color: var(--ink-soft); font-size: 12px; }
+.viva-question-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.viva-selfview { width: 160px; height: 120px; object-fit: cover; border-radius: var(--radius); background: var(--navy); transform: scaleX(-1); flex: none; }
+.viva-video { width: 100%; max-width: 480px; border-radius: var(--radius); background: var(--navy); }
+@media (max-width: 520px) { .viva-selfview { width: 112px; height: 84px; } }

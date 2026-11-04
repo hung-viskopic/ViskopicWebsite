@@ -20,6 +20,7 @@ ESSAY = ("Urban transport policy shapes who can reach jobs. "
          "Critics reply that charges fall hardest on low-income drivers who have no alternative. ") * 3
 
 WEBM = b"\x1a\x45\xdf\xa3" + b"\x00" * 2000   # magic bytes are enough for the server's sniffing
+WEBM_VIDEO = b"\x1a\x45\xdf\xa3" + b"\x00" * 200 + b"V_VP8" + b"\x00" * 200 + b"A_OPUS" + b"\x00" * 2000
 
 
 class FakeAI:
@@ -190,7 +191,7 @@ def test_spoken_viva_end_to_end(client, tenant_factory, mail, fake_ai):
     assert intro["status"] == "opened" and intro["question_count"] == 2 and intro["answer_format"] == "spoken"
     assert intro["transcribed"] is True
     assert set(intro) == {"institution_name", "status", "message", "kind", "answer_format", "question_count",
-                          "prep_seconds", "answer_seconds", "deadline_at", "is_test", "transcribed"}
+                          "prep_seconds", "answer_seconds", "deadline_at", "is_test", "transcribed", "camera_required"}
 
     # Nothing can be written before starting.
     assert pub(client, "POST", tok, "/next").status_code == 409
@@ -398,3 +399,43 @@ def test_other_institution_and_operator_see_nothing(client, tenant_factory):
     # Operator functions expose no viva data.
     row = next(r for r in client.get("/api/platform/institutions", headers=OPERATOR).json() if r["id"] == a.id)
     assert not any("viva" in k for k in row)
+
+
+def test_camera_viva_records_video(client, tenant_factory):
+    t = tenant_factory()
+    _, case_id, reviewer, viewer = make_case(client, t)
+    # The camera only goes with spoken answers.
+    r = client.post(f"/api/cases/{case_id}/viva-invitations", headers=reviewer, json={
+        "kind": "style", "answer_format": "typed", "camera": True, "email": "s@example.ac.uk",
+        "questions": [{"text": "Explain how you wrote this essay."}]})
+    assert r.status_code == 422
+    inv = invite(client, reviewer, case_id, camera=True)
+    tok = token_of(inv["test_link"])
+    assert pub(client, "GET", tok).json()["camera_required"] is True
+    s = pub(client, "POST", tok, "/start").json()["session"]
+    q1 = pub(client, "POST", tok, "/next", s).json()["question"]
+    assert pub(client, "PUT", tok, f"/answers/{q1['id']}/audio", s, content=WEBM_VIDEO).status_code == 200
+    # An answer that arrives without a video track (camera failed) is kept, and the gap is recorded.
+    q2 = pub(client, "POST", tok, "/next", s).json()["question"]
+    assert pub(client, "PUT", tok, f"/answers/{q2['id']}/audio", s, content=WEBM).status_code == 200
+    assert pub(client, "POST", tok, "/next", s).json()["done"] is True
+    assert pub(client, "POST", tok, "/submit", s).status_code == 200
+
+    rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
+    assert rep["invitation"]["supervision_mode"] == "oral_video" and rep["invitation"]["camera_required"] is True
+    a, b = rep["questions"]
+    assert a["recording"]["has_video"] is True and a["recording"]["mime_type"] == "video/webm"
+    assert b["recording"]["has_video"] is False and b["signals"]["camera_unavailable"] is True
+    r = client.get(f"/api/viva-recordings/{a['recording']['id']}/audio", headers=viewer)
+    assert r.status_code == 200 and r.headers["content-type"] == "video/webm" and r.content == WEBM_VIDEO
+    # Without the camera option, video tracks are not marked as video.
+    plain = invite(client, reviewer, case_id)
+    assert pub(client, "GET", token_of(plain["test_link"])).json()["camera_required"] is False
+
+
+def test_video_track_detection():
+    assert viva_service.has_video_track(WEBM_VIDEO, "audio/webm")
+    assert not viva_service.has_video_track(WEBM, "audio/webm")
+    mp4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 40 + b"hdlr" + b"\x00" * 8 + b"vide" + b"\x00" * 50
+    assert viva_service.has_video_track(mp4, "audio/mp4")
+    assert viva_service.media_type("audio/mp4", True) == "video/mp4"

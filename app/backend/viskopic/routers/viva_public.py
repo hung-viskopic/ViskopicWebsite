@@ -115,7 +115,7 @@ def intro(token: str):
         "institution_name": name, "status": inv["status"], "message": CLOSED.get(inv["status"]),
         "kind": inv["viva_kind"], "answer_format": inv["answer_format"], "question_count": n,
         "prep_seconds": inv["prep_seconds"], "answer_seconds": inv["answer_seconds"],
-        "deadline_at": inv["deadline_at"], "is_test": inv["is_test"],
+        "deadline_at": inv["deadline_at"], "is_test": inv["is_test"], "camera_required": inv["camera_required"],
         "transcribed": inv["answer_format"] == "spoken" and ai.enabled(),
     }
 
@@ -222,13 +222,14 @@ async def save_audio(token: str, question_id: UUID, request: Request,
                      x_viva_session: str | None = Header(default=None)):
     s = get_settings()
     declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > s.viva_max_audio_bytes:
+    limit = max(s.viva_max_audio_bytes, s.viva_max_video_bytes)   # the per-invitation limit is checked below
+    if declared and declared.isdigit() and int(declared) > limit:
         raise HTTPException(413, "the recording is too large")
     ids = await run_in_threadpool(_resolve, token)     # check the token before reading the body
     data = bytearray()
     async for chunk in request.stream():
         data += chunk
-        if len(data) > s.viva_max_audio_bytes:
+        if len(data) > limit:
             raise HTTPException(413, "the recording is too large")
     if not data:
         raise HTTPException(422, "the recording is empty")
@@ -245,13 +246,20 @@ def _store_audio(ids: tuple[UUID, UUID], question_id: UUID, data: bytes, mime: s
         inv = _load(conn, inv_id, lock=True)
         _session(conn, inv, x_viva_session)
         cur = _check_answerable(conn, iid, inv, question_id, "spoken")
+        s = get_settings()
+        if len(data) > (s.viva_max_video_bytes if inv["camera_required"] else s.viva_max_audio_bytes):
+            raise HTTPException(413, "the recording is too large")
+        video = inv["camera_required"] and viva.has_video_track(data, mime)
+        if inv["camera_required"] and not video:
+            _event(conn, iid, inv_id, "camera_unavailable", question_id)
+        mime = viva.media_type(mime, video)
         dek = institution_dek(conn, iid)
         rec_id = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
         key = viva.audio_key(iid, rec_id)
         get_storage().put(key, crypto.encrypt(dek, data, f"viva_audio:{rec_id}"))
         conn.execute("INSERT INTO viva_recordings (id, institution_id, invitation_id, question_id, storage_key, sha256, "
-                     "mime_type, size_bytes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                     (rec_id, iid, inv_id, question_id, key, hashlib.sha256(data).hexdigest(), mime, len(data)))
+                     "mime_type, size_bytes, has_video) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                     (rec_id, iid, inv_id, question_id, key, hashlib.sha256(data).hexdigest(), mime, len(data), video))
         taken = int((viva.now() - cur["released_at"]).total_seconds())
         conn.execute("INSERT INTO viva_responses (institution_id, invitation_id, question_id, kind, seconds_taken) "
                      "VALUES (%s,%s,%s,'spoken',%s)", (iid, inv_id, question_id, taken))
@@ -288,7 +296,8 @@ def save_text(token: str, question_id: UUID, body: TypedIn, x_viva_session: str 
 
 # ------------------------------------------------------------------ browser signals and submit
 
-BrowserKind = Literal["focus_lost", "focus_back", "paste_blocked", "fullscreen_exit", "mic_unavailable"]
+BrowserKind = Literal["focus_lost", "focus_back", "paste_blocked", "fullscreen_exit", "mic_unavailable",
+                      "camera_unavailable"]
 
 
 class EventIn(BaseModel):

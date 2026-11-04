@@ -49,7 +49,7 @@ export function VivaPanel({ documentId }: { documentId: string }) {
                 <tr key={i.id}>
                   <td>{fmtDate(i.created_at)}</td>
                   <td>{kindLabel[i.viva_kind]}</td>
-                  <td className="cap">{i.answer_format}</td>
+                  <td><span className="cap">{i.answer_format}</span>{i.camera_required && " with camera"}</td>
                   <td><Status value={i.status} />{i.last_error && <div className="muted small">{i.last_error}</div>}</td>
                   <td>{i.answered ?? 0} of {i.questions ?? 0} answered</td>
                   <td>
@@ -104,6 +104,7 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
   const { api } = useAuth();
   const [kind, setKind] = useState<"style" | "reasoning">("reasoning");
   const [format, setFormat] = useState<"spoken" | "typed">("spoken");
+  const [camera, setCamera] = useState(true);
   const [questions, setQuestions] = useState<DraftQuestion[]>([]);
   const [provider, setProvider] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -142,7 +143,7 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
       const r = await api<{ test_link: string }>(`/cases/${caseId}/viva-invitations`, {
         method: "POST",
         body: JSON.stringify({
-          kind, answer_format: format, email: form.get("email"),
+          kind, answer_format: format, camera: format === "spoken" && camera, email: form.get("email"),
           deadline_days: Number(form.get("deadline_days")),
           prep_seconds: Number(form.get("prep_seconds")),
           answer_seconds: Number(form.get("answer_seconds")),
@@ -168,6 +169,15 @@ function InvitationForm({ caseId, aiEnabled, onCancel, onSent }: {
             <option value="typed">Typed (accessibility alternative)</option>
           </select>
         </Field>
+        {format === "spoken" && (
+          <label className="viva-camera-option">
+            <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} />
+            <span>
+              Record the webcam too
+              <small>Video for you to watch. Nothing analyses it. Untick for students who can&apos;t use a camera.</small>
+            </span>
+          </label>
+        )}
       </div>
 
       <div className="viva-questions">

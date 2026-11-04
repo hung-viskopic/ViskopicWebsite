@@ -160,7 +160,11 @@ The student opens an emailed link (no staff login) and answers one question at a
 server: a question is released only after the previous one is answered or timed out (no reading ahead, no going
 back); each deadline is measured from release (think time + answer time), with a 10 s grace; one browser session
 at a time (opening the link elsewhere takes the session over and is recorded). Spoken answers are recorded in the
-browser and transcribed by a worker job when external AI is on; typed answers block paste.
+browser and transcribed by a worker job when external AI is on; typed answers block paste. With **Record the
+webcam too** (default for spoken vivas, [`0006_viva_camera.sql`](../app/backend/migrations/0006_viva_camera.sql),
+supervision mode `oral_video`) each answer is one small video (320×240, about 15 fps, about 250 kbps): the student
+sees a self-view, the reviewer watches it in the report. The server checks the container for a video track and
+records "no camera video" when it is missing. Nothing analyses the video.
 
 The report shows each question, the passage, the recording (played through the API, audited), the automatic
 transcript, a speech/silence timeline and neutral signals (left the page, paste attempts, late answers, device

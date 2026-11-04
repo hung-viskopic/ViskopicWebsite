@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # Viva. Links in emails point at the web app.
     web_base_url: str = "http://localhost:3000"
     viva_max_audio_bytes: int = 10 * 1024 * 1024
+    viva_max_video_bytes: int = 24 * 1024 * 1024   # camera on; stays under the transcription service's 25 MB limit
     viva_max_typed_chars: int = 5000
     viva_answer_grace_seconds: int = 10       # network slack after a question's server deadline
     viva_rate_limit_per_minute: int = 240     # public token endpoints, per client IP

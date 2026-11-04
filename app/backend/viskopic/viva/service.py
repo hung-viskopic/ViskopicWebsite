@@ -6,6 +6,7 @@ import html
 import hashlib
 import hmac
 import logging
+import re
 import secrets
 from datetime import datetime, timezone
 from uuid import UUID
@@ -72,6 +73,24 @@ def sniff_audio(data: bytes) -> str | None:
     if data[4:8] == b"ftyp":
         return "audio/mp4"
     return None
+
+
+_WEBM_VIDEO = (b"V_VP8", b"V_VP9", b"V_AV1", b"V_MPEG4/ISO/AVC")
+_MP4_VIDEO = re.compile(rb"hdlr.{8}vide", re.DOTALL)
+
+
+def has_video_track(data: bytes, mime: str) -> bool:
+    """Whether the recording contains a video track, read from the container's track headers."""
+    head = data[:262144]
+    if mime == "audio/webm":
+        return any(codec in head for codec in _WEBM_VIDEO)
+    if mime == "audio/mp4":
+        return _MP4_VIDEO.search(head) is not None
+    return False
+
+
+def media_type(mime: str, video: bool) -> str:
+    return mime.replace("audio/", "video/") if video else mime
 
 
 def audio_key(institution_id, recording_id) -> str:

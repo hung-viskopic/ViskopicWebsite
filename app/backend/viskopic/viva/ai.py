@@ -118,7 +118,7 @@ class OpenAIProvider:
         return json.loads(r.json()["choices"][0]["message"]["content"])
 
     def transcribe(self, audio: bytes, mime_type: str) -> dict:
-        ext = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a"}[mime_type]
+        ext = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "video/webm": "webm", "video/mp4": "mp4"}[mime_type]
         r = httpx.post(
             f"{self._s.openai_base_url}/audio/transcriptions",
             headers=self._headers,

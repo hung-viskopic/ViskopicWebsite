@@ -16,6 +16,14 @@ reviewer neutral signals. It does not build automated webcam proctoring.
   behind `VISKOPIC_ALLOW_EXTERNAL_AI`. Drafted passages must appear verbatim in the essay; a reviewer approves
   every question; the AI never rates answers.
 
+## Webcam recording (added 2026-10-29)
+
+A per-invitation option records the webcam together with each spoken answer, as many company online assessments
+do. The student is told on the intro page, sees a self-view and must allow the camera to start; students who can't
+use a camera get an audio-only or typed viva. The video is watched by a person only and stored encrypted with the
+audio's rules. No automated analysis, which keeps it ordinary personal data rather than biometric processing or
+high-risk AI monitoring.
+
 ## Not built, and why
 
 Gaze tracking for reading detection, response-latency flags, pitch-variance ("monotone") flags and phone/headphone

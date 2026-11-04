@@ -11,6 +11,7 @@ import type { VivaAssessment, VivaReport, VivaReportQuestion, VivaSignals, VivaT
 const ratingLabel = { consistent: "Consistent with authorship", unclear: "Unclear", concern: "Concern" } as const;
 const modeLabel = {
   oral_recorded: "Spoken answers, recorded, no staff present",
+  oral_video: "Spoken answers with webcam video, recorded, no staff present. The video was not analysed by software",
   restricted: "Typed answers, paste blocked, no staff present",
 } as const;
 
@@ -93,7 +94,7 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
       {q.answer_kind === "typed" && <div className="text-view">{q.typed_answer}</div>}
       {q.answer_kind === "spoken" && q.recording && (
         <>
-          <AudioPlayer recordingId={q.recording.id} status={q.recording.status} />
+          <MediaPlayer recordingId={q.recording.id} status={q.recording.status} video={q.recording.has_video} />
           {q.transcript ? (
             <>
               <Timeline t={q.transcript.timeline} />
@@ -117,7 +118,7 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
   );
 }
 
-function AudioPlayer({ recordingId, status }: { recordingId: string; status: string }) {
+function MediaPlayer({ recordingId, status, video }: { recordingId: string; status: string; video: boolean }) {
   const { apiBlob } = useAuth();
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +133,7 @@ function AudioPlayer({ recordingId, status }: { recordingId: string; status: str
         <button className="btn secondary" onClick={async () => {
           try { setUrl(URL.createObjectURL(await apiBlob(`/viva-recordings/${recordingId}/audio`))); }
           catch (e) { setError((e as Error).message); }
-        }}>Load recording</button>{" "}
+        }}>{video ? "Load video" : "Load recording"}</button>{" "}
         <span className="muted small">Playing a recording is recorded in the audit log.</span>
         <ErrorNote error={error} />
       </p>
@@ -140,9 +141,15 @@ function AudioPlayer({ recordingId, status }: { recordingId: string; status: str
   }
   return (
     <div className="viva-audio">
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio controls src={url} autoPlay
-        ref={(el) => { if (el) el.playbackRate = rate; }} />
+      {video ? (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <video className="viva-video" controls src={url} autoPlay playsInline
+          ref={(el) => { if (el) el.playbackRate = rate; }} />
+      ) : (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <audio controls src={url} autoPlay
+          ref={(el) => { if (el) el.playbackRate = rate; }} />
+      )}
       <label className="small">
         Speed{" "}
         <select value={rate} onChange={(e) => setRate(Number(e.target.value))}>
@@ -181,6 +188,7 @@ function Signals({ s, seconds }: { s: VivaSignals; seconds: number | null }) {
   items.push(s.focus_lost ? `Left the page ${s.focus_lost} time(s), ${s.away_seconds}s in total` : "Stayed on the page");
   if (s.paste_blocked) items.push(`${s.paste_blocked} paste attempt(s) blocked`);
   if (s.fullscreen_exit) items.push(`Left full screen ${s.fullscreen_exit} time(s)`);
+  if (s.camera_unavailable) items.push("No camera video for this answer (camera off or unavailable)");
   if (s.late_write) items.push(`${s.late_write} answer(s) arrived after the time limit and were refused`);
   return (
     <ul className="chips section-gap" aria-label="Signals for this question">

@@ -194,7 +194,8 @@ export type VivaInvitation = {
   id: string;
   viva_kind: "style" | "reasoning";
   answer_format: "spoken" | "typed";
-  supervision_mode: "oral_recorded" | "restricted";
+  supervision_mode: "oral_recorded" | "oral_video" | "restricted";
+  camera_required: boolean;
   status: string;
   deadline_at: string;
   prep_seconds: number;
@@ -236,6 +237,7 @@ export type VivaSignals = {
   late_write: number;
   timed_out: boolean;
   mic_unavailable: boolean;
+  camera_unavailable: boolean;
 };
 
 export type VivaTimeline = {
@@ -268,7 +270,7 @@ export type VivaReportQuestion = {
   seconds_taken: number | null;
   saved_at: string | null;
   typed_answer: string | null;
-  recording: { id: string; status: string; size_bytes: number } | null;
+  recording: { id: string; status: string; size_bytes: number; has_video: boolean; mime_type: string } | null;
   transcript: { text: string; timeline: VivaTimeline; provider: string; model: string } | null;
   transcript_job: string | null;
   signals: VivaSignals;

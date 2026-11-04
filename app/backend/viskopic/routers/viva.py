@@ -47,7 +47,7 @@ def _submission_text(conn: Connection, institution_id: UUID, document_id: UUID) 
     return crypto.decrypt(dek, row["text_enc"], f"document_text:{document_id}").decode()
 
 
-INVITATION_COLS = ("id, viva_kind, answer_format, supervision_mode, status, deadline_at, prep_seconds, answer_seconds, "
+INVITATION_COLS = ("id, viva_kind, answer_format, supervision_mode, camera_required, status, deadline_at, prep_seconds, answer_seconds, "
                    "is_test, last_error, created_at, sent_at, opened_at, started_at, submitted_at, revoked_at, "
                    "revoke_reason, replaces_id")
 
@@ -114,6 +114,7 @@ class QuestionIn(BaseModel):
 class InvitationIn(BaseModel):
     kind: Kind
     answer_format: Format = "spoken"
+    camera: bool = False          # record the webcam with each spoken answer (watched by a person, never analysed)
     email: EmailStr
     deadline_days: int = Field(default=7, ge=1, le=30)
     prep_seconds: int = Field(default=30, ge=0, le=300)
@@ -127,6 +128,8 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
     case = _case(conn, p, case_id, MANAGE)
     if case["status"] == "withdrawn":
         raise HTTPException(409, "the case was withdrawn because its document was removed")
+    if body.camera and body.answer_format != "spoken":
+        raise HTTPException(422, "the camera can only be used with spoken answers")
     text = None
     questions = []
     for q in body.questions:
@@ -139,23 +142,24 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
             item.update(passage=text[span[0]:span[1]], passage_start=span[0], passage_end=span[1])
         questions.append(item)
     out = _issue(conn, p, case_id, body.kind, body.answer_format, str(body.email), body.deadline_days,
-                 body.prep_seconds, body.answer_seconds, questions, replaces=None)
+                 body.prep_seconds, body.answer_seconds, questions, replaces=None, camera=body.camera)
     audit.record(conn, p, "viva.invitation_created", "viva_invitation", out["id"],
-                 {"case_id": str(case_id), "kind": body.kind, "format": body.answer_format,
+                 {"case_id": str(case_id), "kind": body.kind, "format": body.answer_format, "camera": body.camera,
                   "questions": len(questions), "sources": sorted({q["source"] for q in questions})})
     return out
 
 
 def _issue(conn: Connection, p: Principal, case_id: UUID, kind: str, fmt: str, email: str, deadline_days: int,
-           prep: int, answer: int, questions: list[dict], replaces: UUID | None) -> dict:
+           prep: int, answer: int, questions: list[dict], replaces: UUID | None, camera: bool = False) -> dict:
     dek = institution_dek(conn, p.institution_id)
     token = viva.new_token()
     inv_id = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
     conn.execute(
         "INSERT INTO viva_invitations (id, institution_id, case_id, viva_kind, answer_format, supervision_mode, "
-        "token_sha256, token_ciphertext, email_ciphertext, deadline_at, prep_seconds, answer_seconds, created_by, "
-        "replaces_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (inv_id, p.institution_id, case_id, kind, fmt, "oral_recorded" if fmt == "spoken" else "restricted",
+        "camera_required, token_sha256, token_ciphertext, email_ciphertext, deadline_at, prep_seconds, answer_seconds, "
+        "created_by, replaces_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (inv_id, p.institution_id, case_id, kind, fmt,
+         "restricted" if fmt == "typed" else "oral_video" if camera else "oral_recorded", camera,
          viva.token_hash(token), crypto.encrypt(dek, token.encode(), f"viva_token:{inv_id}"),
          crypto.encrypt(dek, email.encode(), f"viva_invitation_email:{inv_id}"),
          viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces))
@@ -198,7 +202,8 @@ def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     viva.revoke(conn, invitation_id, "replaced by a new link", p.user_id)
     remaining = max(1, (inv["deadline_at"] - viva.now()).days + 1) if inv["status"] != "expired" else 7
     out = _issue(conn, p, inv["case_id"], inv["viva_kind"], inv["answer_format"], email, min(remaining, 30),
-                 inv["prep_seconds"], inv["answer_seconds"], questions, replaces=invitation_id)
+                 inv["prep_seconds"], inv["answer_seconds"], questions, replaces=invitation_id,
+                 camera=inv["camera_required"])
     audit.record(conn, p, "viva.invitation_resent", "viva_invitation", out["id"], {"replaces": str(invitation_id)})
     return out
 
@@ -214,7 +219,7 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     qs = conn.execute(
         "SELECT q.id, q.position, q.text_ciphertext, q.passage_ciphertext, q.passage_start, q.passage_end, q.source, "
         "rl.released_at, rl.due_at, a.kind AS answer_kind, a.answer_ciphertext, a.id AS response_id, a.seconds_taken, "
-        "a.saved_at, r.id AS recording_id, r.status AS recording_status, r.size_bytes "
+        "a.saved_at, r.id AS recording_id, r.status AS recording_status, r.size_bytes, r.has_video, r.mime_type "
         "FROM viva_questions q LEFT JOIN viva_question_releases rl ON rl.question_id = q.id "
         "LEFT JOIN viva_responses a ON a.question_id = q.id LEFT JOIN viva_recordings r ON r.question_id = q.id "
         "WHERE q.invitation_id = %s ORDER BY q.position", (invitation_id,)).fetchall()
@@ -249,7 +254,8 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
             "released_at": q["released_at"], "due_at": q["due_at"],
             "answer_kind": q["answer_kind"], "seconds_taken": q["seconds_taken"], "saved_at": q["saved_at"],
             "typed_answer": dec(q["answer_ciphertext"], f"viva_response:{q['response_id']}") if q["response_id"] else None,
-            "recording": {"id": q["recording_id"], "status": q["recording_status"], "size_bytes": q["size_bytes"]}
+            "recording": {"id": q["recording_id"], "status": q["recording_status"], "size_bytes": q["size_bytes"],
+                          "has_video": q["has_video"], "mime_type": q["mime_type"]}
                          if q["recording_id"] else None,
             "transcript": {"text": dec(t["text_ciphertext"], f"viva_transcript:{t['id']}"), "timeline": t["timeline"],
                            "provider": t["provider"], "model": t["model"]} if t else None,
@@ -273,7 +279,7 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
 def _summarise(events: list[dict]) -> dict:
     """Neutral counts for the reviewer. Browser-reported events are self-reported and can be suppressed."""
     out = {"focus_lost": 0, "away_seconds": 0.0, "paste_blocked": 0, "fullscreen_exit": 0, "late_write": 0,
-           "timed_out": False, "mic_unavailable": False}
+           "timed_out": False, "mic_unavailable": False, "camera_unavailable": False}
     lost_at = None
     for e in events:
         k = e["kind"]
@@ -287,8 +293,8 @@ def _summarise(events: list[dict]) -> dict:
             out[k] += 1
         elif k == "question_timed_out":
             out["timed_out"] = True
-        elif k == "mic_unavailable":
-            out["mic_unavailable"] = True
+        elif k in ("mic_unavailable", "camera_unavailable"):
+            out[k] = True
     out["away_seconds"] = round(out["away_seconds"], 1)
     return out
 
