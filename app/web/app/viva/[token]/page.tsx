@@ -174,8 +174,15 @@ export default function VivaPage() {
       e.preventDefault();
       track("copy_blocked", { chars: (window.getSelection()?.toString() ?? "").length });
     };
+    // Dragging text out of the page (into another window) is another way to copy it.
+    const onDrag = (e: DragEvent) => {
+      if (e.target instanceof HTMLTextAreaElement) return;
+      e.preventDefault();
+      track("copy_blocked", { chars: (window.getSelection()?.toString() ?? "").length, drag: true });
+    };
     document.addEventListener("copy", onCopy);
     document.addEventListener("cut", onCopy);
+    document.addEventListener("dragstart", onDrag);
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
@@ -188,6 +195,7 @@ export default function VivaPage() {
       document.removeEventListener("fullscreenchange", onFs);
       document.removeEventListener("copy", onCopy);
       document.removeEventListener("cut", onCopy);
+      document.removeEventListener("dragstart", onDrag);
       clearInterval(t);
     };
   }, [stage, track, flush]);
