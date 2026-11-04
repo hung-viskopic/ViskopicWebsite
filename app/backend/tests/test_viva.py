@@ -603,3 +603,43 @@ def test_followups_need_visq_and_transcription(client, tenant_factory):
         "kind": "reasoning", "answer_format": "typed", "email": "s@example.ac.uk", "followups": True,
         "questions": [{"text": "What is the main argument of your essay?", "source": "template"}]})
     assert r.status_code == 422 and "Visq" in r.json()["detail"]
+
+
+def test_visq_can_run_on_openai(monkeypatch):
+    """VISKOPIC_VISQ_PROVIDER=openai: Visq's calls go to OpenAI's Responses API, not stored, no temperature."""
+    from viskopic.config import get_settings
+    monkeypatch.setenv("VISKOPIC_ALLOW_EXTERNAL_AI", "true")
+    monkeypatch.setenv("VISKOPIC_VISQ_PROVIDER", "openai")
+    monkeypatch.setenv("VISKOPIC_OPENAI_API_KEY", "sk-test")
+    get_settings.cache_clear()
+    sent = []
+
+    class Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"status": "completed", "model": "gpt-5.4-mini-2026-03-17", "output": [
+                {"type": "reasoning"},
+                {"type": "message", "content": [{"type": "output_text", "text": '{"question": "Why?"}'}]}]}
+
+    def fake_post(url, json, headers, timeout):
+        sent.append((url, json, headers))
+        return Resp()
+
+    monkeypatch.setattr(visq.httpx, "post", fake_post)
+    try:
+        assert visq.enabled() and "openai gpt-5.4-mini-2026-03-17" in visq.engine_label()
+        c = visq.client()
+        assert isinstance(c, visq.OpenAIClient)
+        res = c.chat("SYSTEM", "USER", temperature=0.4, max_tokens=100)
+        assert res.ok and res.text == '{"question": "Why?"}'
+        url, body, headers = sent[0]
+        assert url.endswith("/responses") and headers["Authorization"] == "Bearer sk-test"
+        assert body["store"] is False and "temperature" not in body
+        assert body["instructions"] == "SYSTEM" and body["input"] == "USER"
+        monkeypatch.setenv("VISKOPIC_OPENAI_API_KEY", "")
+        get_settings.cache_clear()
+        assert not visq.enabled()                    # no key, no Visq
+    finally:
+        get_settings.cache_clear()

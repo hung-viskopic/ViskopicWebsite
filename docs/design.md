@@ -173,7 +173,8 @@ author can reason through and a reader cannot simply look up; code checks every 
 no invented facts or numbers, no AI/cheating words, no long copying from the essay) and a second call proofreads it.
 Each question comes with a reviewer-only note on what a good answer covers and, where it can be found, the essay
 passage it is about. The reviewer edits and approves every main question. Visq runs through OpenRouter with zero
-data retention required on every call and never writes to disk.
+data retention required on every call (or on OpenAI with `VISKOPIC_VISQ_PROVIDER=openai`, see decision 0009) and
+never writes to disk.
 
 **Follow-ups.** With the option on, after each main answer Visq decides once: ask one short follow-up (only when the
 answer gives no reason, stays generic or pulls against the essay) or move on. A worker job decides from the typed

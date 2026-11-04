@@ -6,6 +6,8 @@ question planning and writing, follow-up decisions). This module is our side of 
 - checks the vendored files' SHA-256 before importing them,
 - talks to OpenRouter through our own small HTTP client, with Visq's zero-data-retention provider setting
   on every call (Visq's own client reads a .env file and needs the openai package; ours reads our settings),
+  or, with VISKOPIC_VISQ_PROVIDER=openai, to OpenAI's Responses API (store=false; zero retention is then up to
+  the OpenAI organisation's own agreement, so the engine label says so),
 - never lets Visq write to disk: its extraction cache is switched off, so no essay-derived text is stored
   outside our encrypted tables,
 - maps Visq's output to our question records. Passages must be found in the submission, or are dropped.
@@ -116,30 +118,84 @@ class OpenRouterClient:
                                d.get("model"), d.get("provider"))
 
 
+class OpenAIClient:
+    """Visq's client interface on OpenAI's Responses API. Responses are not stored (store=false). Visq's prompts
+    were tuned on another model, so questions may read differently; the engine label records the model."""
+
+    def __init__(self, budget=None):
+        s = get_settings()
+        if not s.openai_api_key:
+            raise VisqUnavailable("VISKOPIC_OPENAI_API_KEY is not set")
+        self._s = s
+        self._m = modules()
+        self.budget = budget or self._m.llm.Budget(self._m.config.MAX_SPEND_PER_SESSION_USD)
+
+    def chat(self, system, user, *, temperature, max_tokens, model=None):
+        m = self._m
+        self.budget.check()
+        # No temperature: reasoning-capable OpenAI models reject it; reasoning is switched off instead.
+        body = {"model": model or model_name(), "instructions": system, "input": user,
+                "max_output_tokens": max_tokens, "store": False, "reasoning": {"effort": "none"}}
+        try:
+            r = httpx.post(f"{self._s.openai_base_url}/responses", json=body,
+                           headers={"Authorization": f"Bearer {self._s.openai_api_key}"},
+                           timeout=httpx.Timeout(m.config.CALL_TIMEOUT_S, connect=30))
+        except httpx.HTTPError as e:
+            raise m.llm.CallFailed(f"{type(e).__name__}") from e
+        if r.status_code == 429:
+            raise m.llm.CallFailed("OpenAI rate limit or quota reached (HTTP 429)")
+        if r.status_code != 200:
+            raise m.llm.CallFailed(f"HTTP {r.status_code}")
+        d = r.json()
+        text = "\n".join(c.get("text", "") for item in d.get("output", []) if item.get("type") == "message"
+                         for c in item.get("content", []) if c.get("type") == "output_text")
+        finish = "stop" if d.get("status") == "completed" else "length"
+        return m.llm.LLMResult(text, finish, None, d.get("model"), "openai")
+
+
 def set_client_factory(factory) -> None:
     """Tests install Visq's own offline FakeClient here."""
     global _client_factory
     _client_factory = factory
 
 
+def _provider() -> str:
+    return "openai" if get_settings().visq_provider.strip().lower() == "openai" else "openrouter"
+
+
 def model_name() -> str:
-    return get_settings().visq_model or modules().config.MODEL
+    s = get_settings()
+    if s.visq_model:
+        return s.visq_model
+    return s.visq_openai_model if _provider() == "openai" else modules().config.MODEL
 
 
 def enabled() -> bool:
     s = get_settings()
-    return s.allow_external_ai and (_client_factory is not None or bool(s.openrouter_api_key))
+    if not s.allow_external_ai:
+        return False
+    if _client_factory is not None:
+        return True
+    return bool(s.openai_api_key) if _provider() == "openai" else bool(s.openrouter_api_key)
 
 
 def client():
     if not enabled():
-        raise VisqUnavailable("Visq is switched off (VISKOPIC_ALLOW_EXTERNAL_AI and VISKOPIC_OPENROUTER_API_KEY)")
-    return _client_factory() if _client_factory else OpenRouterClient()
+        key = "VISKOPIC_OPENAI_API_KEY" if _provider() == "openai" else "VISKOPIC_OPENROUTER_API_KEY"
+        raise VisqUnavailable(f"Visq is switched off (VISKOPIC_ALLOW_EXTERNAL_AI and {key})")
+    if _client_factory:
+        return _client_factory()
+    return OpenAIClient() if _provider() == "openai" else OpenRouterClient()
 
 
 def engine_label() -> str:
     m = modules()
-    model = "offline stand-in" if _client_factory else model_name()
+    if _client_factory:
+        model = "offline stand-in"
+    elif _provider() == "openai":
+        model = f"openai {model_name()}, no zero-retention guarantee"
+    else:
+        model = f"{model_name()} via OpenRouter, zero data retention"
     return f"visq {m.visq.PROMPT_VERSION} {model} ({VENDOR_COMMIT})"
 
 

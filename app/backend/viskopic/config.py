@@ -79,9 +79,14 @@ class Settings(BaseSettings):
     # Visq (vendor/visq_v2): writes the main viva questions from the submission's argument structure and
     # decides one optional follow-up per answer. It sends the essay and the answers to OpenRouter, with zero
     # data retention required on every call. Same rule as above: needs allow_external_ai, synthetic essays only.
+    # "openrouter" (default): the model Visq was tuned on, with zero data retention enforced on every call.
+    # "openai": the same prompts on OpenAI with VISKOPIC_OPENAI_API_KEY (store=false, but no zero-retention
+    # guarantee unless your OpenAI organisation has it). Synthetic essays only either way.
+    visq_provider: str = "openrouter"
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    visq_model: str | None = None             # default: the model Visq was tuned on (vendor/visq_v2/visq/config.py)
+    visq_model: str | None = None             # default: Visq's own model, or visq_openai_model with OpenAI
+    visq_openai_model: str = "gpt-5.4-mini-2026-03-17"   # the snapshot Pipeline 2 already uses
     # How long the student page waits for a follow-up decision before moving on without one.
     viva_followup_wait_seconds: int = 90
 

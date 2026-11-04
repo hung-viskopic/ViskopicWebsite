@@ -122,7 +122,9 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   return nothing about the case or analysis; timing and question release are decided on the server, never by the
   browser; browser signals are hints, labelled as self-reported; a viva rating is not a decision.
 - `VISKOPIC_ALLOW_EXTERNAL_AI` sends essays and answers to OpenRouter (Visq questions and follow-ups, zero data
-  retention required) and recordings to OpenAI (transcription). Synthetic test essays only; false anywhere real
+  retention required) or, with `VISKOPIC_VISQ_PROVIDER=openai`, to OpenAI's Responses API (`store=false`, no
+  zero-retention guarantee, a different model from the one Visq was tuned on; the engine label says both), and
+  recordings to OpenAI (transcription). Synthetic test essays only; false anywhere real
   student work could be present. Passages must be found in the essay or are dropped; Visq's extraction cache stays
   off (`cache=False`); the reviewer note and Visq's follow-up reason are never sent to the student; the AI never
   rates answers. Follow-ups are the only questions not approved in advance (decision 0009).

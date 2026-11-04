@@ -36,3 +36,12 @@ apply their "either flags" rule and wording to finished runs instead, and store 
 - A single worker can delay follow-ups behind a long job; viva jobs are claimed first, and a second worker helps.
 - Pipeline 2's threshold of 0 is provisional (about 1 in 10 human essays fall below it in the model team's tests);
   results are labelled experimental and only route a case to a person.
+
+## Addendum: Visq on OpenAI
+
+`VISKOPIC_VISQ_PROVIDER=openai` runs Visq's unchanged prompts on OpenAI's Responses API with the existing OpenAI
+key (default model `gpt-5.4-mini-2026-03-17`, responses not stored, reasoning off, no temperature). It exists so the
+team can test with one provider. Two differences from the default, both shown in the recorded engine label: Visq
+was tuned on `openai/gpt-oss-120b`, so questions may read differently; and OpenAI may keep request logs for abuse
+monitoring unless the organisation has zero data retention, whereas the OpenRouter path refuses any provider that
+keeps data. Synthetic essays only, as before.
