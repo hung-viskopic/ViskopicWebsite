@@ -90,10 +90,12 @@ class Settings(BaseSettings):
     # How long the student page waits for the worker's Visq step before the server applies it offline (no model).
     viva_followup_wait_seconds: int = 90
 
-    # Pipeline 2 (interchangeability): AI comparison essays are generated once per assignment from the
-    # assignment prompt only (no student work leaves the backend). GPT family only for now, using
-    # openai_api_key; results are marked weaker than the evaluated three-family set.
+    # Pipeline 2, "AI comparison" (interchangeability): AI comparison essays are generated once per assignment from
+    # the assignment prompt only (no student work leaves the backend). GPT essays use openai_api_key. The
+    # evaluated setup adds Qwen 3 14B and Gemma 3 27B from an Ollama server (needs a GPU with about 24 GB for
+    # Gemma); set p2_ollama_url to use them. Without it the set is GPT only and the report says it is weaker.
     p2_generate_comparisons: bool = False
+    p2_ollama_url: str | None = None          # e.g. http://gpu-host:11434
 
 
 @lru_cache

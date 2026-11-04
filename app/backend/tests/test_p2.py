@@ -109,7 +109,7 @@ def test_comparison_set_scoring_and_combined_report(client, tenant_factory, writ
     c = rep["combined"]
     assert c["status"] == "no_flag" and c["flagged_by"] == [] and c["pipelines_run"] == 1
     assert c["pipeline1_consistency"]["status"] == "unavailable"
-    assert any("Pipeline 1 did not run" in n for n in c["coverage_notes"])
+    assert any("The writing-style check did not run" in n for n in c["coverage_notes"])
     assert any("used only gpt54mini" in n for n in c["coverage_notes"])
     assert c["interpretation_warning"].startswith("Evidence for a human reviewer only")
 
@@ -204,3 +204,20 @@ def test_combined_rule_matches_the_model_team():
     assert not any("used only" in n for n in combined.combine(p1_ok, p2_ok).details["coverage_notes"])
     demo = combined.combine(p1_flag, p2_ok, demonstration_profile=True)
     assert demo.outcome == "no_flag" and demo.details["pipeline1_consistency"]["status"] == "unavailable"
+
+
+def test_writers_follow_the_settings(monkeypatch):
+    """GPT with the OpenAI key; Qwen and Gemma only when an Ollama server is configured. No network here."""
+    from viskopic.config import get_settings
+    monkeypatch.setenv("VISKOPIC_P2_GENERATE_COMPARISONS", "true")
+    monkeypatch.setenv("VISKOPIC_OPENAI_API_KEY", "sk-test")
+    get_settings.cache_clear()
+    try:
+        assert interchangeability.generation_enabled()
+        assert sorted(interchangeability._writers()) == ["gpt54mini"]
+        monkeypatch.setenv("VISKOPIC_P2_OLLAMA_URL", "http://gpu-host:11434")
+        get_settings.cache_clear()
+        assert sorted(interchangeability._writers()) == ["gemma3_27b", "gpt54mini", "qwen3_14b"]
+        assert set(interchangeability._writers()) == set(interchangeability.p2().FAMILIES)   # the evaluated set
+    finally:
+        get_settings.cache_clear()

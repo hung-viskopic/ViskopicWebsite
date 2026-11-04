@@ -1,4 +1,5 @@
-"""The combined report for Δ (V1.3 consistency) and Pipeline 2 (interchangeability).
+"""The combined report for the writing-style check (Pipeline 1, Δ, V1.3 consistency) and the AI comparison
+(Pipeline 2, interchangeability). User-facing text uses the plain names; the rule and wording are the model team's.
 
 The rule and the wording are the model team's (`services/viskopic_combined/viskopic_combined/combined.py` in
 VISKOPIC_PROJECT, `feat/combined-p1-p2`, commit e99417a). We re-implement it here instead of calling their
@@ -50,12 +51,13 @@ def _p2(res: PipelineResult | None) -> dict:
 def _coverage_notes(p1: dict, p2: dict, all_families: bool) -> list[str]:
     notes = []
     if p1["status"] == "unavailable" and p2["status"] != "unavailable":
-        notes.append("Pipeline 1 did not run: AI from a model not in the comparison set, or AI rewritten to sound "
-                     "human, can pass Pipeline 2 alone.")
+        notes.append("The writing-style check did not run: AI from a model not in the comparison set, or AI "
+                     "rewritten to sound human, can pass the AI comparison alone.")
     if p2["status"] == "unavailable" and p1["status"] != "unavailable":
-        notes.append("Pipeline 2 did not run: AI prompted to imitate the student's style can pass Pipeline 1 alone.")
+        notes.append("The AI comparison did not run: AI prompted to imitate the student's style can pass the "
+                     "writing-style check alone.")
     if p2["status"] != "unavailable" and not all_families:
-        notes.append(f"Pipeline 2 used only {', '.join(p2['families'])} comparison essays; the evaluated "
+        notes.append(f"The AI comparison used only {', '.join(p2['families'])} comparison essays; the evaluated "
                      "configuration uses all of gpt54mini, qwen3_14b, gemma3_27b and is stronger against other "
                      "AI models.")
     notes.append(ALWAYS_NOTE)

@@ -6,6 +6,11 @@ for the first milestone (foundations and intake) lives in [`app/`](../app/).
 
 Status key: ✅ built · 🔜 next milestones
 
+Reports use plain names: **Writing style** (Pipeline 1, Δ, the V1.3 consistency model) and **AI comparison**
+(Pipeline 2, interchangeability), plus **Document signals**. The α (authenticity) and β (language) placeholders
+were dropped: the team no longer plans them. Old placeholder runs stay in the database (append-only) but are hidden.
+Vivas are sent by a reviewer; a flag never sends one automatically.
+
 ## 1. Principles
 
 1. **Evidence, not bare scores.** Every result explains *why* (checkable observations), *where* (highlighted
@@ -29,7 +34,7 @@ flowchart TD
     C -- yes --> QR{Texts quality-reviewed? ✅}
     QR -- no --> RV[Awaiting review ✅]
     RV -- reviews recorded --> D
-    QR -- yes --> D[Analysis: plug-in pipelines ✅ Δ · 🔜 α β]
+    QR -- yes --> D[Analysis: writing style ✅ · AI comparison ✅]
     D --> E[Evidence report ✅]
     E -- no concern --> X[Closed]
     E -- concern --> F[Viva: style or reasoning ✅ MVP]
@@ -70,10 +75,9 @@ into our extracted text (the Δ model samples from its own normalised copy, so p
 
 | Pipeline | Status | Evidence it produces |
 |---|---|---|
-| Δ Consistency (style) | ✅ real model: frozen V1.3 from `VISKOPIC_PROJECT` (`model/v1-3-mvp-handoff`, commit `d102392`), vendored unchanged in `app/backend/vendor/consistency_v13`, called through the model team's website adapter (`viskopic.website-consistency.v1`) | every scored result labelled **experimental**; overall centred score vs frozen threshold with the margin (not a probability or percentage, can be negative, tiny values shown as "near zero"); raw distance and distance ÷ typical baseline distance, shown separately as descriptive diagnostics; the 3 feature groups that differ most; up to 8 features ≥2 spreads from the student's mean in the same direction in ≥2 of the 3 sampled passages, each with observed value, baseline mean and spread, and the passages to highlight |
+| **Writing style** — Pipeline 1, Δ consistency | ✅ real model: frozen V1.3 from `VISKOPIC_PROJECT` (`model/v1-3-mvp-handoff`, commit `d102392`), vendored unchanged in `app/backend/vendor/consistency_v13`, called through the model team's website adapter (`viskopic.website-consistency.v1`) | every scored result labelled **experimental**; overall centred score vs frozen threshold with the margin (not a probability or percentage, can be negative, tiny values shown as "near zero"); raw distance and distance ÷ typical baseline distance, shown separately as descriptive diagnostics; the 3 feature groups that differ most; up to 8 features ≥2 spreads from the student's mean in the same direction in ≥2 of the 3 sampled passages, each with observed value, baseline mean and spread, and the passages to highlight |
 | Document signals | ✅ | hidden text (white, ≤2pt, hidden formatting, invisible PDF layers); recorded editing time under 1 minute per 100 words. Author names are never copied into statements |
-| Pipeline 2 Interchangeability (takes the β regeneration slot) | ✅ frozen release `p2-interchangeability-v1` from `VISKOPIC_PROJECT` (`feat/combined-p1-p2`, commit `e99417a`), vendored unchanged in `app/backend/vendor/interchangeability_p2` | labelled **experimental**; score = how much more the opening third of the essay's first 250 words shares rare words with its own continuation than AI essays' openings on the same assignment do (below 0 = "interchangeable"; threshold provisional); the opening highlighted; a note when only GPT comparison essays were used. Needs no baseline. Comparison essays are generated once per assignment from the assignment prompt only (`build_comparison_set` job, GPT family for now, `VISKOPIC_P2_GENERATE_COMPARISONS`); about 1 in 5 young writers' essays are unscorable and recorded as *not eligible* |
-| α Authenticity (semantic) | 🔜 research code only | run recorded as *unavailable* |
+| **AI comparison** — Pipeline 2, interchangeability | ✅ frozen release `p2-interchangeability-v1` from `VISKOPIC_PROJECT` (`feat/combined-p1-p2`, commit `e99417a`), vendored unchanged in `app/backend/vendor/interchangeability_p2` | labelled **experimental**; score = how much more the opening third of the essay's first 250 words shares rare words with its own continuation than AI essays' openings on the same assignment do (below 0 = "interchangeable"; threshold provisional); the opening highlighted; a note when only GPT comparison essays were used. Needs no baseline. Comparison essays are generated once per assignment from the assignment prompt only (`build_comparison_set` job, `VISKOPIC_P2_GENERATE_COMPARISONS`; GPT with the OpenAI key, plus Qwen and Gemma when `VISKOPIC_P2_OLLAMA_URL` points at an Ollama GPU server, which is the evaluated three-family set); about 1 in 5 young writers' essays are unscorable and recorded as *not eligible* |
 
 **Combined report** (the model team's "either flags" rule, re-implemented over finished runs in
 `analysis/combined.py`, stored as a `combined` run): *review recommended* when Δ or Pipeline 2 flags, *no flag*
@@ -275,5 +279,5 @@ option to deploy into the university's own cloud account.
 6. 🟡 Viva MVP ✅ (invitations, Visq 2 world-tree vivas or the reviewer's own questions, timed
    spoken/typed answers enforced by the server, transcripts, speech timeline, signals, report and ratings). 🔜 Evaluator with versioned θ, live and
    invigilated supervision, decisions, appeals
-7. 🔜 Real α (semantic) pipeline; Pipeline 2's Qwen and Gemma comparison families (needs an Ollama GPU host); a validated Δ student configuration (fewer, shorter
+7. 🔜 An Ollama GPU host for the AI comparison's Qwen and Gemma families (the setting exists); a validated Δ student configuration (fewer, shorter
    baseline essays) from the model team

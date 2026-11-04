@@ -1,6 +1,7 @@
 """The pipeline contract.
 
-Every analysis pipeline (Δ consistency, Pipeline 2 interchangeability, α authenticity, document signals)
+Every analysis pipeline (writing style = Δ consistency, AI comparison = Pipeline 2 interchangeability,
+document signals)
 implements `Pipeline.run(ctx) -> PipelineResult`. A result is never a bare score: it carries
 evidence items (template statements with the observed value against the student's own
 baseline, character spans to highlight, and a contribution), plus the pipeline's version and

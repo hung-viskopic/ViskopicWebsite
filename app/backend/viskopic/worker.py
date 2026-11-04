@@ -37,7 +37,7 @@ UPDATE jobs SET status = 'running', attempts = attempts + 1,
                                        WHEN 'transcribe_viva_answer' THEN interval '5 minutes'
                                        WHEN 'visq2_prepare' THEN interval '10 minutes'
                                        WHEN 'visq2_step' THEN interval '5 minutes'
-                                       WHEN 'build_comparison_set' THEN interval '20 minutes'
+                                       WHEN 'build_comparison_set' THEN interval '60 minutes'
                                        ELSE interval '2 minutes' END,
        updated_at = now()
 WHERE id = (

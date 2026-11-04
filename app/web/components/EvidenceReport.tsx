@@ -54,9 +54,8 @@ export function formatScore(value: number | null | undefined): string {
 }
 
 const categoryLabel: Record<string, string> = {
-  style: "Style",
-  semantic: "Semantic",
-  regeneration: "Regeneration",
+  style: "Writing style",
+  regeneration: "AI comparison",
   document: "Document",
 };
 
@@ -244,7 +243,7 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
         <p className="note info">
           The consistency model only compares texts a reviewer has checked. Record a quality review for this
           submission (above) and for each of the student&apos;s baseline documents; the case is analysed again
-          after each review. The Δ pipeline below shows which side still needs one.
+          after each review. The writing-style section below shows which side still needs one.
         </p>
       )}
 
@@ -365,7 +364,7 @@ function RunCard({ run, open, onToggle, selectedKey, onShow }: {
             </p>
             <div className="stats">
               <div className="stat">
-                <p className="label">Interchangeability score</p>
+                <p className="label">AI comparison score</p>
                 <strong>{formatScore(run.score)}</strong>
                 <span className="muted small">Threshold {formatScore(run.threshold)}; higher reads more human</span>
               </div>
@@ -405,15 +404,15 @@ function RunCard({ run, open, onToggle, selectedKey, onShow }: {
 /** The model team's "either flags" summary over Δ and Pipeline 2. A routing hint for a person, never a finding. */
 function CombinedCard({ c }: { c: CombinedReport }) {
   const parts: [string, CombinedPart][] = [
-    ["Δ Consistency (style)", c.pipeline1_consistency],
-    ["Pipeline 2: Interchangeability", c.pipeline2_interchangeability],
+    ["Writing style", c.pipeline1_consistency],
+    ["AI comparison", c.pipeline2_interchangeability],
   ];
   const partStatus = { flagged: "Flagged", not_flagged: "Not flagged", unavailable: "Did not run" } as const;
   return (
     <div className={`combined combined-${c.status}`} role="status">
       <div className="combined-head">
         <h3>{combinedTitle[c.status]}</h3>
-        <span className="muted small">{c.pipelines_run} of 2 pipelines ran</span>
+        <span className="muted small">{c.pipelines_run} of 2 checks ran</span>
       </div>
       <ul className="combined-parts">
         {parts.map(([label, p]) => (
@@ -427,7 +426,7 @@ function CombinedCard({ c }: { c: CombinedReport }) {
           {c.coverage_notes.map((n) => <li key={n}>{n}</li>)}
         </ul>
       )}
-      <p className="muted small">{c.interpretation_warning} Review is recommended when either pipeline flags; scores are never averaged.</p>
+      <p className="muted small">{c.interpretation_warning} Review is recommended when either check flags; scores are never averaged.</p>
     </div>
   );
 }

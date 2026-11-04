@@ -230,7 +230,7 @@ export default function CourseDetail() {
                   </select>
                 </Field>
                 <Field label="Prompt (optional)"
-                  hint="The question students answered. Pipeline 2 writes AI comparison essays from this text (only the prompt is sent).">
+                  hint="The question students answered. The AI comparison check writes comparison essays from this text (only the prompt is sent).">
                   <textarea name="prompt" rows={3} />
                 </Field>
               </ActionForm>

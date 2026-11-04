@@ -34,8 +34,10 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - `app/web` — Next.js 16 + React 19 + TypeScript, keycloak-js (Auth Code + PKCE). Port 3000.
 - `app/backend` — Python 3.13, FastAPI (API, port 8000) and `viskopic.worker` (same codebase).
 - `app/backend/viskopic/analysis/` — pipeline contract (`base.py`), Δ adapter (`consistency.py`), Pipeline 2
-  (`interchangeability.py`), the combined either-flags report (`combined.py`), document signals and the α
-  placeholder (`signals.py`), profiles/cases/runs orchestration (`service.py`).
+  (`interchangeability.py`), the combined either-flags report (`combined.py`), document signals and the pipeline
+  list (`signals.py`), profiles/cases/runs orchestration (`service.py`). In the UI they are **Writing style**
+  (Δ) and **AI comparison** (Pipeline 2). α authenticity and β language are dropped (not planned); old runs are
+  hidden, never deleted. A flag never sends a viva: reviewers send vivas by hand.
 - `app/backend/vendor/interchangeability_p2/` (Pipeline 2, commit `e99417a`) and `app/backend/vendor/visq_v2/`
   (Visq viva engine, commit `3d631d8`) — vendored byte-for-byte like V1.3, every file's SHA-256 checked before import
   (`FILE_SHA256` in `analysis/interchangeability.py` and `viva/visq.py`). Never edit them; see their `VENDORED.md`.
@@ -93,7 +95,8 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   product rule (3 essays / 1,500 words). Don't lower these constants: a student configuration must come from the
   model team with its own validation.
 - ✅ Pipeline 2 (interchangeability, `0007_visq_and_p2.sql`): AI comparison essays per assignment from the prompt only
-  (`build_comparison_set` job, GPT family, `VISKOPIC_P2_GENERATE_COMPARISONS`), scored locally, no baseline needed;
+  (`build_comparison_set` job, `VISKOPIC_P2_GENERATE_COMPARISONS`; GPT, plus Qwen/Gemma when `VISKOPIC_P2_OLLAMA_URL`
+  is set), scored locally, no baseline needed;
   combined report stored as a `combined` run. Threshold 0 is provisional; label it experimental.
 - ✅ Visq 2 world-tree vivas (`0008_visq2.sql`, `viskopic/viva/visq.py`): flow `visq2` on an invitation. Visq reads
   the essay (`visq2_prepare` job), then during the viva writes clarifying questions, a timed typed extension and a
@@ -107,7 +110,7 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   recording (`0006_viva_camera.sql`, supervision mode `oral_video`): video for a person to watch, never analysed.
   18 viva tests.
 - 🔜 Next: evaluator with versioned θ → live/invigilated supervision → decisions with evidence snapshot →
-  appeals → real α pipeline; Pipeline 2 Qwen/Gemma families. 56 backend tests in total.
+  appeals; an Ollama GPU host for the AI comparison's Qwen/Gemma families. 57 backend tests in total.
 
 ## Working conventions
 

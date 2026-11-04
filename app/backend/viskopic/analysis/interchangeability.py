@@ -42,8 +42,7 @@ FILE_SHA256 = {
     "comparisons.py": "db74fa308b98c8229318b33b88ed74f0a14bd2bc5fb897d955853ff1a2a0210c",
     "scoring.py": "14b0a8cc1cd6a652b99e395389b9f34daccd9c66336934233514585df4db4e5e",
 }
-# Families generated here for now. The evaluated configuration is all three; GPT-only is weaker.
-FAMILIES_IN_USE = ("gpt54mini",)
+OLLAMA_FAMILIES = ("qwen3_14b", "gemma3_27b")   # need p2_ollama_url; the evaluated set is these plus gpt54mini
 
 _lock = threading.Lock()
 _p2 = None
@@ -87,13 +86,22 @@ def set_writer_override(writers: dict | None) -> None:
 
 def generation_enabled() -> bool:
     s = get_settings()
-    return _writer_override is not None or (s.p2_generate_comparisons and bool(s.openai_api_key))
+    return _writer_override is not None or (s.p2_generate_comparisons and bool(s.openai_api_key or s.p2_ollama_url))
 
 
 def _writers() -> dict:
+    """The model team's frozen writers for each family we can reach: GPT with the OpenAI key, Qwen and Gemma
+    with an Ollama server. Whatever is missing is simply absent, and the report says the set is weaker."""
     if _writer_override is not None:
         return dict(_writer_override)
-    return {"gpt54mini": p2().openai_writer(get_settings().openai_api_key)}
+    s = get_settings()
+    writers = {}
+    if s.openai_api_key:
+        writers["gpt54mini"] = p2().openai_writer(s.openai_api_key)
+    if s.p2_ollama_url:
+        for family in OLLAMA_FAMILIES:
+            writers[family] = p2().ollama_writer(family, s.p2_ollama_url)
+    return writers
 
 
 def queue_comparison_set(conn: Connection, institution_id: UUID, assignment_id: UUID, user_id: UUID | None,
@@ -266,7 +274,8 @@ class InterchangeabilityPipeline:
         if not all_families:
             items.append(EvidenceItem(
                 category="regeneration", kind="comparison_coverage",
-                statement=("Only GPT comparison essays were used. The evaluated setup also uses Qwen and Gemma "
-                           "essays and is stronger against AI from other models."),
+                statement=(f"Only {', '.join(sorted(res['family_scores']))} comparison essays were used. The "
+                           "evaluated setup uses GPT, Qwen and Gemma essays and is stronger against AI from other "
+                           "models."),
                 details={"families": sorted(res["family_scores"])}))
         return items
