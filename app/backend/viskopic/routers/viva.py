@@ -1,4 +1,4 @@
-"""Viva, staff side: draft questions, send invitations, read the report, record assessments."""
+"""Viva, staff side: send invitations (Visq 2, or the reviewer's own questions), read the report, record assessments."""
 from datetime import timedelta
 from typing import Literal
 from uuid import UUID
@@ -49,13 +49,7 @@ def _submission_text(conn: Connection, institution_id: UUID, document_id: UUID) 
 
 INVITATION_COLS = ("id, viva_kind, answer_format, supervision_mode, camera_required, status, deadline_at, prep_seconds, answer_seconds, "
                    "is_test, last_error, created_at, sent_at, opened_at, started_at, submitted_at, revoked_at, "
-                   "revoke_reason, replaces_id, followups_enabled, question_engine")
-
-
-def _assignment_prompt(conn: Connection, document_id: UUID) -> str | None:
-    row = conn.execute("SELECT a.prompt FROM documents d JOIN assignments a ON a.id = d.assignment_id "
-                       "WHERE d.id = %s", (document_id,)).fetchone()
-    return row["prompt"] if row and row["prompt"] else None
+                   "revoke_reason, replaces_id, question_engine, flow, visq2_full, extension_seconds")
 
 
 # ------------------------------------------------------------------ list and draft
@@ -84,34 +78,21 @@ def list_vivas(document_id: UUID, p: Principal = Depends(require_user), conn: Co
         "case": case,
         "can_manage": access.course_access(conn, p, doc["course_id"]) == MANAGE,
         "ai_enabled": ai.enabled(),              # transcription of spoken answers
-        "visq_enabled": visq.enabled(),          # Visq questions and follow-ups
+        "visq_enabled": visq.enabled(),          # Visq 2 world-tree vivas
         "invitations": invitations,
     }
 
 
 class DraftIn(BaseModel):
     kind: Kind
-    count: int = Field(default=5, ge=1, le=8)
+    count: int = Field(default=4, ge=1, le=8)
 
 
 @router.post("/cases/{case_id}/viva-drafts")
 def draft(case_id: UUID, body: DraftIn, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
-    """Suggested questions, not stored. With Visq on, they are written from the submission's argument structure
-    (each tied to a passage where it can be found) and come with a reviewer-only note on what a good answer covers."""
-    case = _case(conn, p, case_id, MANAGE)
-    if not visq.enabled():
-        return {"provider": "templates", "engine": "templates",
-                "questions": [q.__dict__ | {"qtype": None, "reviewer_note": None}
-                              for q in ai.template_questions(body.kind, body.count)]}
-    text = _submission_text(conn, p.institution_id, case["document_id"])
-    try:
-        questions = visq.draft(text, _assignment_prompt(conn, case["document_id"]), body.count)
-    except visq.VisqUnavailable as e:
-        raise HTTPException(502, str(e)) from e
-    engine = visq.engine_label()
-    audit.record(conn, p, "viva.questions_drafted", "case", case_id,
-                 {"provider": "visq", "engine": engine, "kind": body.kind, "returned": len(questions)})
-    return {"provider": "visq", "engine": engine, "questions": [q.__dict__ for q in questions]}
+    """Template questions for a viva with the reviewer's own questions. Visq 2 writes its own during the viva."""
+    _case(conn, p, case_id, MANAGE)
+    return {"provider": "templates", "questions": [q.__dict__ for q in ai.template_questions(body.kind, body.count)]}
 
 
 # ------------------------------------------------------------------ invitations
@@ -120,9 +101,7 @@ def draft(case_id: UUID, body: DraftIn, p: Principal = Depends(require_user), co
 class QuestionIn(BaseModel):
     text: str = Field(min_length=10, max_length=ai.MAX_QUESTION_CHARS)
     passage: str | None = Field(default=None, max_length=ai.MAX_PASSAGE_CHARS)
-    source: Literal["visq", "template", "reviewer"] = "reviewer"
-    qtype: str | None = Field(default=None, max_length=20)
-    reviewer_note: str | None = Field(default=None, max_length=1000)
+    source: Literal["template", "reviewer"] = "reviewer"
 
 
 class InvitationIn(BaseModel):
@@ -133,8 +112,12 @@ class InvitationIn(BaseModel):
     deadline_days: int = Field(default=7, ge=1, le=30)
     prep_seconds: int = Field(default=30, ge=0, le=300)
     answer_seconds: int = Field(default=120, ge=30, le=600)
-    questions: list[QuestionIn] = Field(min_length=1, max_length=8)
-    followups: bool = False       # Visq may ask one follow-up after each answer (needs Visq, and transcription if spoken)
+    # "visq2": Visq writes the questions during the viva (clarifying questions, a timed extension, a short viva).
+    # "standard": the reviewer's own (or template) questions, approved before sending.
+    flow: Literal["standard", "visq2"] = "standard"
+    questions: list[QuestionIn] = Field(default_factory=list, max_length=8)
+    visq2_full: bool = False                                    # 7 viva questions instead of 3
+    extension_minutes: int = Field(default=6, ge=1, le=30)      # time for Visq 2's typed extension
 
 
 @router.post("/cases/{case_id}/viva-invitations", status_code=201)
@@ -145,15 +128,19 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
         raise HTTPException(409, "the case was withdrawn because its document was removed")
     if body.camera and body.answer_format != "spoken":
         raise HTTPException(422, "the camera can only be used with spoken answers")
-    if body.followups and not visq.enabled():
-        raise HTTPException(422, "follow-ups need Visq, which is switched off")
-    if body.followups and body.answer_format == "spoken" and not ai.enabled():
-        raise HTTPException(422, "follow-ups to spoken answers need transcription, which is switched off")
+    if body.flow == "visq2":
+        if not visq.enabled():
+            raise HTTPException(422, "Visq is switched off (VISKOPIC_ALLOW_EXTERNAL_AI and a model key)")
+        if body.answer_format != "typed" or body.camera:
+            raise HTTPException(422, "a Visq 2 viva takes typed answers")
+        if body.questions:
+            raise HTTPException(422, "Visq 2 writes its own questions during the viva")
+    elif not body.questions:
+        raise HTTPException(422, "add at least one question")
     text = None
     questions = []
     for q in body.questions:
-        item = {"text": q.text.strip(), "source": q.source, "qtype": q.qtype if q.source == "visq" else None,
-                "reviewer_note": q.reviewer_note if q.source == "visq" else None}
+        item = {"text": q.text.strip(), "source": q.source}
         if q.passage and q.passage.strip():
             text = text if text is not None else _submission_text(conn, p.institution_id, case["document_id"])
             span = ai.locate(text, q.passage)
@@ -161,34 +148,44 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
                 raise HTTPException(422, f"this passage is not in the submission: \"{q.passage[:60]}…\"")
             item.update(passage=text[span[0]:span[1]], passage_start=span[0], passage_end=span[1])
         questions.append(item)
-    engine = visq.engine_label() if any(q["source"] == "visq" for q in questions) or body.followups else "reviewer"
+    engine = visq.engine_label() if body.flow == "visq2" else "reviewer"
     out = _issue(conn, p, case_id, body.kind, body.answer_format, str(body.email), body.deadline_days,
                  body.prep_seconds, body.answer_seconds, questions, replaces=None, camera=body.camera,
-                 followups=body.followups, engine=engine)
+                 engine=engine, flow=body.flow, visq2_full=body.visq2_full,
+                 extension_seconds=body.extension_minutes * 60 if body.flow == "visq2" else None)
     audit.record(conn, p, "viva.invitation_created", "viva_invitation", out["id"],
                  {"case_id": str(case_id), "kind": body.kind, "format": body.answer_format, "camera": body.camera,
                   "questions": len(questions), "sources": sorted({q["source"] for q in questions}),
-                  "followups": body.followups, "engine": engine})
+                  "flow": body.flow, "engine": engine})
     return out
 
 
 def _issue(conn: Connection, p: Principal, case_id: UUID, kind: str, fmt: str, email: str, deadline_days: int,
            prep: int, answer: int, questions: list[dict], replaces: UUID | None, camera: bool = False,
-           followups: bool = False, engine: str | None = None) -> dict:
+           engine: str | None = None, flow: str = "standard", visq2_full: bool = False,
+           extension_seconds: int | None = None) -> dict:
     dek = institution_dek(conn, p.institution_id)
     token = viva.new_token()
     inv_id = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
     conn.execute(
         "INSERT INTO viva_invitations (id, institution_id, case_id, viva_kind, answer_format, supervision_mode, "
         "camera_required, token_sha256, token_ciphertext, email_ciphertext, deadline_at, prep_seconds, answer_seconds, "
-        "created_by, replaces_id, followups_enabled, question_engine) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "created_by, replaces_id, question_engine, flow, visq2_full, extension_seconds) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (inv_id, p.institution_id, case_id, kind, fmt,
          "restricted" if fmt == "typed" else "oral_video" if camera else "oral_recorded", camera,
          viva.token_hash(token), crypto.encrypt(dek, token.encode(), f"viva_token:{inv_id}"),
          crypto.encrypt(dek, email.encode(), f"viva_invitation_email:{inv_id}"),
-         viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces, followups, engine))
-    viva.create_questions(conn, dek, p.institution_id, inv_id, questions)
+         viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces, engine, flow, visq2_full,
+         extension_seconds))
+    if flow == "visq2":
+        # Visq reads the essay in the worker; the student page waits ("one moment") if they open it before then.
+        conn.execute("INSERT INTO viva_visq2_states (invitation_id, institution_id) VALUES (%s, %s)",
+                     (inv_id, p.institution_id))
+        conn.execute("INSERT INTO jobs (institution_id, kind, viva_invitation_id) VALUES (%s, 'visq2_prepare', %s)",
+                     (p.institution_id, inv_id))
+    else:
+        viva.create_questions(conn, dek, p.institution_id, inv_id, questions)
     viva.queue_email(conn, p.institution_id, inv_id)
     # Test vivas only: the reviewer may open the link directly instead of waiting for the email.
     return {"id": inv_id, "status": "queued", "test_link": viva.viva_link(token)}
@@ -218,13 +215,9 @@ def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     email = crypto.decrypt(dek, inv["email_ciphertext"], f"viva_invitation_email:{invitation_id}").decode()
     questions = []
     for q in conn.execute("SELECT * FROM viva_questions WHERE invitation_id = %s AND parent_id IS NULL "
-                          "ORDER BY position", (invitation_id,)).fetchall():
+                          "AND source <> 'visq2' ORDER BY position", (invitation_id,)).fetchall():
         item = {"text": crypto.decrypt(dek, q["text_ciphertext"], f"viva_question:{q['id']}").decode(),
-                "source": q["source"], "passage_start": q["passage_start"], "passage_end": q["passage_end"],
-                "qtype": q["qtype"]}
-        if q["reviewer_note_ciphertext"]:
-            item["reviewer_note"] = crypto.decrypt(dek, q["reviewer_note_ciphertext"],
-                                                   f"viva_question_note:{q['id']}").decode()
+                "source": q["source"], "passage_start": q["passage_start"], "passage_end": q["passage_end"]}
         if q["passage_ciphertext"]:
             item["passage"] = crypto.decrypt(dek, q["passage_ciphertext"], f"viva_passage:{q['id']}").decode()
         questions.append(item)
@@ -232,7 +225,8 @@ def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     remaining = max(1, (inv["deadline_at"] - viva.now()).days + 1) if inv["status"] != "expired" else 7
     out = _issue(conn, p, inv["case_id"], inv["viva_kind"], inv["answer_format"], email, min(remaining, 30),
                  inv["prep_seconds"], inv["answer_seconds"], questions, replaces=invitation_id,
-                 camera=inv["camera_required"], followups=inv["followups_enabled"], engine=inv["question_engine"])
+                 camera=inv["camera_required"], engine=inv["question_engine"], flow=inv["flow"],
+                 visq2_full=inv["visq2_full"], extension_seconds=inv["extension_seconds"])
     audit.record(conn, p, "viva.invitation_resent", "viva_invitation", out["id"], {"replaces": str(invitation_id)})
     return out
 
@@ -253,7 +247,7 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
         "FROM viva_questions q LEFT JOIN viva_question_releases rl ON rl.question_id = q.id "
         "LEFT JOIN viva_responses a ON a.question_id = q.id LEFT JOIN viva_recordings r ON r.question_id = q.id "
         "WHERE q.invitation_id = %s ORDER BY q.position, q.parent_id IS NOT NULL", (invitation_id,)).fetchall()
-    decisions = {d["question_id"]: d for d in conn.execute(
+    decisions = {d["question_id"]: d for d in conn.execute(        # Visq 1 vivas sent before Visq 2 replaced it
         "SELECT id, question_id, action, reason, why_ciphertext, engine, created_at FROM viva_followup_decisions "
         "WHERE invitation_id = %s", (invitation_id,)).fetchall()}
     rec_ids = [q["recording_id"] for q in qs if q["recording_id"]]
@@ -309,7 +303,23 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
             "second_sessions": sum(1 for e in events if e["kind"] == "second_session")},
         "events": [{k: e[k] for k in ("question_id", "kind", "source", "at")} for e in events],
         "overall": by_q.get(None),
+        "visq2": _visq2_report(conn, dek, p, inv) if inv["flow"] == "visq2" else None,
     }
+
+
+def _visq2_report(conn: Connection, dek: bytes, p: Principal, inv: dict) -> dict:
+    """Visq's preparation status and its reviewer note (a reading aid comparing wording; never a score)."""
+    row, state = viva.load_visq2(conn, dek, inv["id"])
+    out = {"status": row["status"] if row else None, "error": row["error"] if row else None,
+           "engine": row["engine"] if row else None, "full": inv["visq2_full"],
+           "extension_seconds": inv["extension_seconds"], "note": None}
+    if state is not None and inv["status"] == "submitted":
+        essay = _submission_text(conn, p.institution_id, inv["document_id"])
+        try:
+            out["note"] = visq.note(state, essay)
+        except Exception as e:  # the note is a reading aid; the answers above are the record
+            out["note_error"] = f"{type(e).__name__}"
+    return out
 
 
 def _decision_out(d: dict | None, dec) -> dict | None:

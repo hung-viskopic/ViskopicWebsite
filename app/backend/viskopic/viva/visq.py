@@ -1,23 +1,29 @@
-"""Visq: the model team's viva engine, used to write the main questions and to decide follow-ups.
+"""Visq 2: the model team's viva engine, run as the world-tree flow.
 
-Visq is vendored unchanged in `vendor/visq_v2/visq/` (only the modules Visq 1 needs: argument extraction,
-question planning and writing, follow-up decisions). This module is our side of the integration:
+Visq is vendored unchanged in `vendor/visq_v2/visq/` (the modules the Visq 2 world-tree flow needs). The flow:
+the essay is read as a tree of points and what it takes for granted; clarifying questions where the essay is
+silent; a timed, typed extension (a what-if from outside the essay); then a short viva (3 questions, or 7 with
+the full set) whose questions depend on the earlier answers, each with a worked example on request. A reviewer
+note compares the wording of the answers with the essay's structure: notes, never scores.
+
+This module is our side of the integration:
 
 - checks the vendored files' SHA-256 before importing them,
 - talks to OpenRouter through our own small HTTP client, with Visq's zero-data-retention provider setting
   on every call (Visq's own client reads a .env file and needs the openai package; ours reads our settings),
   or, with VISKOPIC_VISQ_PROVIDER=openai, to OpenAI's Responses API (store=false; zero retention is then up to
   the OpenAI organisation's own agreement, so the engine label says so),
-- never lets Visq write to disk: its extraction cache is switched off, so no essay-derived text is stored
-  outside our encrypted tables,
-- maps Visq's output to our question records. Passages must be found in the submission, or are dropped.
+- never lets Visq write to disk: Visq keeps its state in one JSON file per person; we subclass its `WorldViva`
+  so the state lives in memory for one call and is stored encrypted by the caller (`viva_visq2_states`),
+- runs every step that may call a model in the worker; the API only runs Visq's code-only steps.
 
-The student never sees the reviewer note ("what a good answer covers") or Visq's reason for a follow-up.
-Visq never rates an answer.
+The student never sees the reviewer note. Visq never rates an answer or decides anything about a person.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
+import json
 import logging
 import sys
 import threading
@@ -27,22 +33,22 @@ from pathlib import Path
 import httpx
 
 from ..config import get_settings
-from . import ai
-
 log = logging.getLogger("viskopic.viva.visq")
 
 VENDOR_DIR = Path(__file__).resolve().parents[2] / "vendor" / "visq_v2"
 VENDOR_COMMIT = "3d631d8"           # keep in step with vendor/visq_v2/VENDORED.md
 FILE_SHA256 = {
     "__init__.py": "0e678bd88d8f0c598548716a779aed7e3c9b9225936b6fca3f9efb078cf678c3",
-    "aroa.py": "e55f854449c0354adbccbc294a8491d0671414031ab6c478bbe566589c6c13b3",
+    "analysis.py": "7a0d23f41f3cca97aaea267f842e9b19223d0bdf1da475a9b6b36cf876edf773",
     "config.py": "1e6fd169c40895d32e401944ab6b75547adb614180396fb30347a18d702b9ef1",
-    "fake.py": "e0b5a60e5aca9ff9dd95f40ba6311d88ce5a29d52062c3973903449ae2f390bd",
-    "followups.py": "0725e37114d15e0c9a66a2c07981f17363373294f3808f2062e9e02d5b7ac55e",
     "llm.py": "7a337c7e7d944fc3b7637a3355579560aa885d61aca21fe2ac346b8fe66dedf2",
     "prompts.py": "220c21feeea200e09727566d181033b14a2a5424bd4991edff38a1f3cce4ddeb",
-    "questions.py": "ca2f69cea60a326d9180bd79fe72401e0798293df2b84891b3639914984afef2",
     "text.py": "8d06b38825a497f4dd8802cf613788a44d3436637b14dc2669daf0d276650d5f",
+    "treealgo.py": "00231dd012832fd69f84806235f0ea0add5c476f078b264a3551985afda04647",
+    "vivaplan.py": "0e4fbd202fa96f9272d882fd26e092b7234ff4a76e748027348b18edf257cfc5",
+    "vivatext.py": "f8cba81f44817d11a0b40a422e0f4da9a138778e73f445a0e05cb4e26bdd3ed6",
+    "worldalg.py": "ce7d68160bf5de7b936cd5b92395f7ee7f8f659ba545ea8b193d58b1acde2fb4",
+    "worldviva.py": "e47fe7cde27d5293bbde945767434ac8f91b54930b56b43239f20183effd8421",
 }
 
 _lock = threading.Lock()
@@ -68,10 +74,10 @@ def modules():
             if str(VENDOR_DIR) not in sys.path:
                 sys.path.insert(0, str(VENDOR_DIR))
             import visq
-            from visq import aroa, config, fake, followups, llm, questions, text
+            from visq import config, llm, text, vivatext, worldviva
 
-            _mods = type("VisqModules", (), dict(visq=visq, aroa=aroa, config=config, fake=fake, followups=followups,
-                                                  llm=llm, questions=questions, text=text))
+            _mods = type("VisqModules", (), dict(visq=visq, config=config, llm=llm, text=text, vivatext=vivatext,
+                                                  worldviva=worldviva))
         return _mods
 
 
@@ -154,7 +160,7 @@ class OpenAIClient:
 
 
 def set_client_factory(factory) -> None:
-    """Tests install Visq's own offline FakeClient here."""
+    """Tests install a client factory here (None, or a client; Visq 2 treats no client as offline)."""
     global _client_factory
     _client_factory = factory
 
@@ -189,71 +195,115 @@ def client():
 
 
 def engine_label() -> str:
-    m = modules()
     if _client_factory:
-        model = "offline stand-in"
+        model = "test client"
     elif _provider() == "openai":
         model = f"openai {model_name()}, no zero-retention guarantee"
     else:
         model = f"{model_name()} via OpenRouter, zero data retention"
-    return f"visq {m.visq.PROMPT_VERSION} {model} ({VENDOR_COMMIT})"
+    return f"visq {modules().visq.VERSION} world-tree, {model} ({VENDOR_COMMIT})"
 
 
 def _quiet(*_args, **_kwargs) -> None:
     pass
 
 
-# ------------------------------------------------------------------ main questions
+# ------------------------------------------------------------------ Visq 2 world-tree flow
+
+CODE = "viva"   # Visq keys its state by participant code; we keep one state per invitation, so any fixed code works
 
 
-@dataclass
-class VisqQuestion:
-    text: str
-    qtype: str
-    reviewer_note: str
-    passage: str | None
-    passage_start: int | None
-    passage_end: int | None
-    source: str = "visq"
+class VisqStateError(Exception):
+    """Visq refused a step (e.g. an answer when no question is waiting)."""
 
 
-def draft(essay: str, assignment: str | None, count: int) -> list[VisqQuestion]:
-    """Visq 1: extract the argument structure, plan targets, write and check `count` questions."""
+_wv_class = None
+
+
+def _worldviva(state: dict | None, offline: bool):
+    """Visq's WorldViva with its file storage replaced by an in-memory state for this one call."""
+    global _wv_class
     m = modules()
-    norm = m.text.normalise(essay)
+    if _wv_class is None:
+        class DBWorldViva(m.worldviva.WorldViva):
+            def __init__(self, st, factory):
+                super().__init__(Path("/nonexistent-visq-state"), factory, VisqStateError, background=False)
+                self._st = copy.deepcopy(st)
+
+            def has(self, code):
+                return self._st is not None
+
+            def load(self, code):
+                if self._st is None:
+                    raise self.error("no Visq state")
+                return copy.deepcopy(self._st)
+
+            def save(self, code, st):
+                self._st = json.loads(json.dumps(st))      # the same JSON round trip Visq's file storage does
+
+            def delete(self, code):
+                self._st = None
+
+            def state(self):
+                return copy.deepcopy(self._st)
+        _wv_class = DBWorldViva
+    return _wv_class(state, (lambda: None) if offline else _model_client)
+
+
+def _model_client():
+    """A model client for Visq 2, or None (Visq then works offline with its heuristics)."""
+    return client() if enabled() else None
+
+
+def prepare(essay: str, topic: str, extension_seconds: int, full: bool, offline: bool = False) -> dict:
+    """Build the world-tree and the first step. May call the model; run it in the worker."""
+    m = modules()
     try:
-        m.text.check_length(norm)
+        m.text.check_length(m.text.normalise(essay))
     except m.text.EssayError as e:
         raise VisqUnavailable(str(e)) from e
-    c = client()
-    try:
-        graph = m.aroa.extract(c, norm, cache=False, log=_quiet)       # cache off: nothing written to disk
-        out = m.questions.generate_questions(c, graph, norm, n=count, assignment=assignment or "", log=_quiet)
-    except (m.llm.CallFailed, m.llm.BudgetExceeded, m.llm.InsufficientCredits) as e:
-        raise VisqUnavailable(f"Visq could not write questions ({type(e).__name__})") from e
-    result = []
-    for q in out:
-        span = ai.locate(essay, q.get("passage") or "")
-        result.append(VisqQuestion(
-            text=q["question"].strip(), qtype=q["qtype"], reviewer_note=q.get("good_answer_covers", "").strip(),
-            passage=essay[span[0]:span[1]] if span else None,
-            passage_start=span[0] if span else None, passage_end=span[1] if span else None))
-    return result
+    wv = _worldviva(None, offline)
+    wv.start(CODE, essay, topic or "", extension_seconds, use_llm=not offline, full=full)
+    st = wv.state()
+    if st.get("status") == "failed":
+        raise VisqUnavailable(st.get("error") or "Visq could not read the essay")
+    return st
 
 
-# ------------------------------------------------------------------ follow-ups
+def view(state: dict) -> dict:
+    """What the student should see now (Visq's own view of its state)."""
+    return _worldviva(state, offline=True).view(CODE)
 
 
-def is_empty_answer(answer: str) -> bool:
-    return modules().followups.is_empty_answer(answer)
+def start_extension(state: dict) -> dict:
+    wv = _worldviva(state, offline=True)
+    wv.start_extension(CODE)
+    return wv.state()
 
 
-def decide_followup(question: str, answer: str, passage: str | None, earlier_followups: list[str],
-                    session_asked: list[str]) -> dict:
-    """Visq's follow-up decision for one main question: {"action", "question", "why"}. At most one per question."""
-    m = modules()
-    try:
-        return m.followups.decide(client(), question, answer, passage or "", [], list(earlier_followups),
-                                  session_asked=list(session_asked))
-    except (m.llm.CallFailed, m.llm.BudgetExceeded, m.llm.InsufficientCredits) as e:
-        raise VisqUnavailable(f"Visq could not decide a follow-up ({type(e).__name__})") from e
+def take_answer(state: dict, stage: str, text: str, essay: str, offline: bool = False) -> dict:
+    """Feed one answer into the flow. After the last clarifying answer and after the extension Visq may call the
+    model (the what-if and the viva questions), so this runs in the worker; offline=True is the quick fallback."""
+    wv = _worldviva(state, offline)
+    if stage == "extension":
+        wv.submit_extension(CODE, text, essay)
+    else:
+        wv.answer(CODE, text, essay)
+    return wv.state()
+
+
+def example(state: dict, n: int) -> tuple[dict, dict]:
+    """The worked example for the current question (a different topic), and the state with the press counted."""
+    wv = _worldviva(state, offline=True)
+    ex = wv.example(CODE, n)
+    return ex, wv.state()
+
+
+def note(state: dict, essay: str) -> str:
+    """Visq's reviewer note (markdown). Reviewer only; computed when read, never stored."""
+    return _worldviva(state, offline=True).note(CODE, essay)
+
+
+def texts() -> dict:
+    vt = modules().vivatext
+    return {"warning": vt.WARNING, "ext_note": vt.EXT_NOTE, "viva_start": vt.VIVA_START}

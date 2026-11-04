@@ -45,3 +45,23 @@ team can test with one provider. Two differences from the default, both shown in
 was tuned on `openai/gpt-oss-120b`, so questions may read differently; and OpenAI may keep request logs for abuse
 monitoring unless the organisation has zero data retention, whereas the OpenRouter path refuses any provider that
 keeps data. Synthetic essays only, as before.
+
+## Addendum: Visq 2 replaces Visq 1 (2026-11-04)
+
+The team chose Visq 2's world-tree flow over Visq 1. We now vendor the Visq 2 modules (`worldviva`, `worldalg`,
+`vivaplan`, `vivatext`, `treealgo` and their helpers) from the same commit and drop Visq 1's (`aroa`, `questions`,
+`followups`). Visq 2 asks clarifying questions, gives a timed typed extension (a what-if from outside the essay) and
+then a short viva whose questions depend on the earlier answers.
+
+- **No question is approved in advance in a Visq 2 viva.** This widens the follow-up exception above to the whole
+  Visq 2 flow. Instead: every question is frozen as it is released and shown in the report with its answer; the
+  student is told on the intro page that an automated system chooses the next question and does not mark answers;
+  the reviewer note is a reading aid that compares wording, never a score. The reviewer's own-questions flow stays
+  for anyone who wants approved questions.
+- **Typed answers only.** Visq 2's extension is typed and its note compares wording; spoken answers would add a
+  transcription wait before every step.
+- **Visq's state is ours to store.** `WorldViva` keeps a JSON file per person; we subclass it so the state lives in
+  memory for one call and is stored encrypted and versioned in `viva_visq2_states`. Steps that may call a model run
+  in the worker; if a step is late, the API applies it with Visq's offline heuristics so the student is never stuck.
+- Known limits from the model team at freeze: the real-model path was tried by hand on a few essays; the note's
+  markers see wording, not meaning, so a correct answer in other words can read "not evident".

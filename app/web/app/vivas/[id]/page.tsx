@@ -13,6 +13,7 @@ const ratingLabel = { consistent: "Consistent with authorship", unclear: "Unclea
 const sourceText: Record<string, string> = {
   visq: "Written by Visq, approved by reviewer",
   visq_followup: "Follow-up asked by Visq, not approved in advance",
+  visq2: "Written by Visq 2 during the viva, not approved in advance",
   ai_draft: "Drafted by AI, approved by reviewer",
   template: "Template",
   reviewer: "Written by reviewer",
@@ -70,19 +71,34 @@ export default function VivaReportPage() {
           <dt>Submitted</dt><dd>{fmtDate(inv.submitted_at)}</dd>
           <dt>Time per question</dt><dd>{inv.prep_seconds}s to think, {inv.answer_seconds}s to answer</dd>
           <dt>Questions</dt>
-          <dd>
-            {inv.question_engine ?? "Reviewer"}
-            {inv.followups_enabled ? ", with up to one Visq follow-up per question" : ""}
-          </dd>
+          <dd>{inv.question_engine ?? "Reviewer"}</dd>
+          {inv.flow === "visq2" && (
+            <><dt>Visq 2 set</dt><dd>{inv.visq2_full ? "Full (7 viva questions)" : "Short (3 viva questions)"}, extension {Math.round((inv.extension_seconds ?? 0) / 60)} min</dd></>
+          )}
+          {r.visq2?.status === "failed" && (<><dt>Visq</dt><dd className="error">Could not read the essay: {r.visq2.error}</dd></>)}
           <dt>Switched device or window</dt><dd>{r.session.second_sessions === 0 ? "No" : `${r.session.second_sessions} time(s)`}</dd>
           {inv.revoke_reason && (<><dt>Withdrawn</dt><dd>{fmtDate(inv.revoked_at)}: {inv.revoke_reason}</dd></>)}
         </dl>
         {!submitted && <p className="muted small">The full report appears once the student submits.</p>}
       </section>
 
+      {r.questions.length === 0 && inv.flow === "visq2" && (
+        <p className="muted">Visq writes the questions as the student goes; they appear here once released.</p>
+      )}
       {r.questions.map((q) => (
         <QuestionReport key={q.id} q={q} canAssess={r.can_manage && submitted} invitationId={id} onSaved={rep.reload} />
       ))}
+
+      {r.visq2?.note && (
+        <section className="card">
+          <h2>Visq&apos;s reviewer note</h2>
+          <p className="muted small">
+            A reading aid from Visq: it compares the wording of the answers with the essay&apos;s own structure. &quot;Not
+            evident&quot; is not &quot;wrong&quot;, and nothing in it is a finding about the student.
+          </p>
+          <div className="text-view viva-note">{r.visq2.note}</div>
+        </section>
+      )}
 
       {submitted && (
         <section className="card">
@@ -103,10 +119,13 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
   return (
     <section className="card viva-report-q">
       <div className="card-head">
-        <h2>{q.parent_id ? `Follow-up to question ${q.position}` : `Question ${q.position}`}</h2>
+        <h2>
+          {q.source === "visq2" ? `${q.position}. ${qtypeLabel[q.qtype ?? ""] ?? "Question"}`
+            : q.parent_id ? `Follow-up to question ${q.position}` : `Question ${q.position}`}
+        </h2>
         <span className="muted small">
           {sourceText[q.source] ?? q.source}
-          {q.qtype && !q.parent_id && ` · ${qtypeLabel[q.qtype] ?? q.qtype}`}
+          {q.qtype && !q.parent_id && q.source !== "visq2" && ` · ${qtypeLabel[q.qtype] ?? q.qtype}`}
         </span>
       </div>
       {q.passage && <blockquote className="viva-passage"><span className="label">Passage shown</span><p>{q.passage}</p></blockquote>}

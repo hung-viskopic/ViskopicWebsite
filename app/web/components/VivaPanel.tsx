@@ -8,12 +8,11 @@ import { fmtDate, useResource } from "@/lib/hooks";
 import type { DraftQuestion, VivaList } from "@/lib/types";
 
 const kindLabel = { style: "Style viva", reasoning: "Reasoning viva" } as const;
-const sourceLabel: Record<string, string> = {
-  visq: "Visq draft", ai_draft: "AI draft", template: "Template", reviewer: "Written by reviewer",
-};
-/** Visq question types, in the words a reviewer would use. */
+const sourceLabel: Record<string, string> = { ai_draft: "AI draft", template: "Template", reviewer: "Written by reviewer" };
+/** What each kind of question is, in the words a reviewer would use (Visq 2 steps, and older Visq 1 types). */
 export const qtypeLabel: Record<string, string> = {
-  tradeoff: "Trade-off", limit: "What if a reason failed", case: "New case", followup: "Follow-up", link: "Linked",
+  clarify: "Clarifying question", extension: "Extension (what-if)", viva: "Viva question",
+  tradeoff: "Trade-off", limit: "What if a reason failed", case: "New case", followup: "Follow-up",
 };
 
 /** Viva section on a submission: list of invitations and the form to send a new one. */
@@ -57,7 +56,7 @@ export function VivaPanel({ documentId }: { documentId: string }) {
                   <td>{kindLabel[i.viva_kind]}</td>
                   <td>
                     <span className="cap">{i.answer_format}</span>{i.camera_required && " with camera"}
-                    {i.followups_enabled && <div className="muted small">with Visq follow-ups</div>}
+                    {i.flow === "visq2" && <div className="muted small">Visq 2</div>}
                   </td>
                   <td><Status value={i.status} />{i.last_error && <div className="muted small">{i.last_error}</div>}</td>
                   <td>{i.answered ?? 0} of {i.questions ?? 0} answered</td>
@@ -104,42 +103,38 @@ function InvitationActions({ id, status, onDone }: { id: string; status: string;
   );
 }
 
-function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
+function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
   caseId: string;
-  /** Transcription of spoken answers. */
+  /** Transcription of spoken answers (not used by Visq 2, which is typed). */
   aiEnabled: boolean;
-  /** Visq question drafts and follow-ups. */
+  /** Visq 2 world-tree vivas. */
   visqEnabled: boolean;
   onCancel: () => void;
   onSent: (link: string) => void;
 }) {
   const { api } = useAuth();
+  const [flow, setFlow] = useState<"visq2" | "standard">(visqEnabled ? "visq2" : "standard");
   const [kind, setKind] = useState<"style" | "reasoning">("reasoning");
   const [format, setFormat] = useState<"spoken" | "typed">("spoken");
   const [camera, setCamera] = useState(true);
-  const [followups, setFollowups] = useState(visqEnabled);
-  // Follow-ups are decided from the answer, so spoken answers need transcription.
-  const followupsPossible = visqEnabled && (format === "typed" || aiEnabled);
+  const [full, setFull] = useState(false);
   const [questions, setQuestions] = useState<DraftQuestion[]>([]);
-  const [provider, setProvider] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const visq2 = flow === "visq2";
 
   async function draft() {
     setBusy("draft");
     setError(null);
     try {
       const r = await api<{ provider: string; questions: DraftQuestion[] }>(`/cases/${caseId}/viva-drafts`, {
-        method: "POST", body: JSON.stringify({ kind, count: visqEnabled ? 5 : 4 }),
+        method: "POST", body: JSON.stringify({ kind, count: 4 }),
       });
       setQuestions(r.questions);
-      setProvider(r.provider);
-      if (r.questions.length === 0) setError("No usable questions came back. Try again or write your own.");
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
 
   function update(i: number, patch: Partial<DraftQuestion>) {
-    // An edited draft keeps its origin label; the report shows where each question started.
     setQuestions((qs) => qs.map((q, j) => (j === i ? { ...q, ...patch } : q)));
   }
   function move(i: number, d: -1 | 1) {
@@ -158,15 +153,15 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
       const r = await api<{ test_link: string }>(`/cases/${caseId}/viva-invitations`, {
         method: "POST",
         body: JSON.stringify({
-          kind, answer_format: format, camera: format === "spoken" && camera, email: form.get("email"),
+          kind, flow, email: form.get("email"),
+          answer_format: visq2 ? "typed" : format,
+          camera: !visq2 && format === "spoken" && camera,
           deadline_days: Number(form.get("deadline_days")),
           prep_seconds: Number(form.get("prep_seconds")),
           answer_seconds: Number(form.get("answer_seconds")),
-          questions: questions.map((q) => ({
-            text: q.text, passage: q.passage || null, source: q.source,
-            qtype: q.qtype ?? null, reviewer_note: q.reviewer_note ?? null,
-          })),
-          followups: followupsPossible && followups,
+          ...(visq2
+            ? { visq2_full: full, extension_minutes: Number(form.get("extension_minutes")) }
+            : { questions: questions.map((q) => ({ text: q.text, passage: q.passage || null, source: q.source })) }),
         }),
       });
       onSent(r.test_link);
@@ -176,19 +171,29 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
   return (
     <form className="viva-form" onSubmit={(e) => { e.preventDefault(); send(new FormData(e.currentTarget)); }}>
       <div className="form inline">
+        {visqEnabled && (
+          <Field label="Questions" hint={visq2 ? "Written by Visq during the viva" : "Approved by you before sending"}>
+            <select value={flow} onChange={(e) => setFlow(e.target.value as "visq2" | "standard")}>
+              <option value="visq2">Visq 2: written from the essay during the viva</option>
+              <option value="standard">My own questions</option>
+            </select>
+          </Field>
+        )}
         <Field label="Viva type">
           <select value={kind} onChange={(e) => setKind(e.target.value as "style" | "reasoning")}>
             <option value="reasoning">Reasoning: the argument and evidence</option>
             <option value="style">Style: how it was written</option>
           </select>
         </Field>
-        <Field label="Answers" hint={format === "spoken" ? "Recorded in the browser" : "Paste is blocked"}>
-          <select value={format} onChange={(e) => setFormat(e.target.value as "spoken" | "typed")}>
-            <option value="spoken">Spoken (recommended)</option>
-            <option value="typed">Typed (accessibility alternative)</option>
-          </select>
-        </Field>
-        {format === "spoken" && (
+        {!visq2 && (
+          <Field label="Answers" hint={format === "spoken" ? "Recorded in the browser" : "Paste is blocked"}>
+            <select value={format} onChange={(e) => setFormat(e.target.value as "spoken" | "typed")}>
+              <option value="spoken">Spoken (recommended)</option>
+              <option value="typed">Typed (accessibility alternative)</option>
+            </select>
+          </Field>
+        )}
+        {!visq2 && format === "spoken" && (
           <label className="viva-camera-option">
             <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} />
             <span>
@@ -197,87 +202,86 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
             </span>
           </label>
         )}
-        {visqEnabled && (
-          <label className="viva-camera-option">
-            <input type="checkbox" checked={followupsPossible && followups} disabled={!followupsPossible}
-              onChange={(e) => setFollowups(e.target.checked)} />
-            <span>
-              Let Visq ask one follow-up after each answer
-              <small>
-                {followupsPossible
-                  ? "Only when an answer gives no reason or stays generic. Follow-ups are not approved in advance; the report labels them and shows why each was asked."
-                  : "Needs transcription for spoken answers, which is switched off."}
-              </small>
-            </span>
-          </label>
-        )}
       </div>
 
-      <div className="viva-questions">
-        <div className="card-head">
-          <h3>Questions</h3>
-          <span>
-            <button type="button" className="btn secondary" onClick={draft} disabled={busy !== null}>
-              {busy === "draft" ? "Visq is reading the essay…" : visqEnabled ? "Draft questions with Visq" : "Use template questions"}
-            </button>{" "}
-            <button type="button" className="btn secondary" disabled={questions.length >= 8}
-              onClick={() => setQuestions((qs) => [...qs, { text: "", passage: null, source: "reviewer" }])}>
-              Add question
-            </button>
-          </span>
-        </div>
-        {provider === "visq" && (
+      {visq2 ? (
+        <div className="viva-questions">
+          <h3>How a Visq 2 viva runs</h3>
+          <ol className="small viva-visq2-steps">
+            <li>Visq reads the essay as a tree of points and what it takes for granted.</li>
+            <li>Clarifying questions, only where the essay is silent about something it relies on.</li>
+            <li>A timed, typed <strong>extension</strong>: a what-if from outside the essay. The student says what they would keep, drop or add.</li>
+            <li>A short viva: {full ? 7 : 3} questions, some with one follow-up. Each has a worked example on request.</li>
+          </ol>
           <p className="note small">
-            Written by Visq from the essay&apos;s own argument: trade-offs, what-ifs and new cases that the author can
-            reason through and a reader of the essay can&apos;t simply look up. The essay went to an outside model with
-            zero data retention. Test data only. Check and edit every question before sending.
+            Visq writes the questions during the viva, so you don&apos;t approve them first; the report shows every
+            question with its answer, plus Visq&apos;s note comparing the wording with the essay (a reading aid, not a
+            score). Answers are typed, with paste blocked. The essay and answers go to an outside model. Test data only.
           </p>
-        )}
-        {!visqEnabled && <p className="muted small">Visq is off, so drafts come from the template bank without passages.</p>}
-        {questions.length === 0 && <p className="muted small">Draft questions or add your own (up to 8).</p>}
-        <ol className="viva-question-list">
-          {questions.map((q, i) => (
-            <li key={i}>
-              <Field label={`Question ${i + 1}`}
-                hint={[sourceLabel[q.source], q.qtype ? qtypeLabel[q.qtype] ?? q.qtype : null].filter(Boolean).join(" · ")}>
-                <textarea rows={2} required minLength={10} maxLength={400} value={q.text}
-                  onChange={(e) => update(i, { text: e.target.value })} />
-              </Field>
-              <Field label="Passage from the essay (optional)" hint="Shown to the student with the question; must be copied exactly from the submission">
-                <textarea rows={2} maxLength={1000} value={q.passage ?? ""}
-                  onChange={(e) => update(i, { passage: e.target.value || null })} />
-              </Field>
-              {q.reviewer_note && (
-                <p className="viva-reviewer-note small">
-                  <strong>What a good answer covers</strong> (for you only): {q.reviewer_note}
-                </p>
-              )}
-              <span className="viva-question-tools">
-                <button type="button" className="link" disabled={i === 0} onClick={() => move(i, -1)}>Move up</button>
-                <button type="button" className="link" disabled={i === questions.length - 1} onClick={() => move(i, 1)}>Move down</button>
-                <button type="button" className="link" onClick={() => setQuestions((qs) => qs.filter((_, j) => j !== i))}>Remove</button>
-              </span>
-            </li>
-          ))}
-        </ol>
-      </div>
+          <label className="viva-camera-option">
+            <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} />
+            <span>Full set<small>7 viva questions instead of 3.</small></span>
+          </label>
+        </div>
+      ) : (
+        <div className="viva-questions">
+          <div className="card-head">
+            <h3>Questions</h3>
+            <span>
+              <button type="button" className="btn secondary" onClick={draft} disabled={busy !== null}>
+                {busy === "draft" ? "Loading…" : "Use template questions"}
+              </button>{" "}
+              <button type="button" className="btn secondary" disabled={questions.length >= 8}
+                onClick={() => setQuestions((qs) => [...qs, { text: "", passage: null, source: "reviewer" }])}>
+                Add question
+              </button>
+            </span>
+          </div>
+          {!visqEnabled && <p className="muted small">Visq is off, so a viva uses your own or template questions.</p>}
+          {questions.length === 0 && <p className="muted small">Use template questions or add your own (up to 8).</p>}
+          <ol className="viva-question-list">
+            {questions.map((q, i) => (
+              <li key={i}>
+                <Field label={`Question ${i + 1}`} hint={sourceLabel[q.source]}>
+                  <textarea rows={2} required minLength={10} maxLength={400} value={q.text}
+                    onChange={(e) => update(i, { text: e.target.value })} />
+                </Field>
+                <Field label="Passage from the essay (optional)" hint="Shown to the student with the question; must be copied exactly from the submission">
+                  <textarea rows={2} maxLength={1000} value={q.passage ?? ""}
+                    onChange={(e) => update(i, { passage: e.target.value || null })} />
+                </Field>
+                <span className="viva-question-tools">
+                  <button type="button" className="link" disabled={i === 0} onClick={() => move(i, -1)}>Move up</button>
+                  <button type="button" className="link" disabled={i === questions.length - 1} onClick={() => move(i, 1)}>Move down</button>
+                  <button type="button" className="link" onClick={() => setQuestions((qs) => qs.filter((_, j) => j !== i))}>Remove</button>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       <div className="form inline">
         <Field label="Student email"><input name="email" type="email" required /></Field>
         <Field label="Deadline (days)"><input name="deadline_days" type="number" min={1} max={30} defaultValue={7} required /></Field>
         <Field label="Preparation time (seconds)" hint="Per question, before answering">
-          <input name="prep_seconds" type="number" min={0} max={300} defaultValue={30} required />
+          <input name="prep_seconds" type="number" min={0} max={300} defaultValue={visq2 ? 0 : 30} required />
         </Field>
-        <Field label="Answer time (seconds)" hint="Enforced by the server">
-          <input name="answer_seconds" type="number" min={30} max={600} defaultValue={120} required />
+        <Field label="Answer time (seconds)" hint="Per question, enforced by the server">
+          <input name="answer_seconds" type="number" min={30} max={600} defaultValue={visq2 ? 180 : 120} required />
         </Field>
+        {visq2 && (
+          <Field label="Extension time (minutes)" hint="For the typed what-if">
+            <input name="extension_minutes" type="number" min={1} max={30} defaultValue={6} required />
+          </Field>
+        )}
       </div>
       <p className="muted small">
         The email names your institution and the deadline only: no score, no mention of AI, no assignment title.
       </p>
       <ErrorNote error={error} />
       <div className="actions">
-        <button className="btn" disabled={busy !== null || questions.length === 0}>{busy === "send" ? "Sending…" : "Send invitation"}</button>
+        <button className="btn" disabled={busy !== null || (!visq2 && questions.length === 0)}>{busy === "send" ? "Sending…" : "Send invitation"}</button>
         <button type="button" className="link" onClick={onCancel}>Cancel</button>
       </div>
     </form>

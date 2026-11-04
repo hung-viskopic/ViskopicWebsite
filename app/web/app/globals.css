@@ -430,3 +430,11 @@ ul.chips { list-style: none; padding: 0; margin-left: 0; }
 /* Visq: reviewer-only note on what a good answer covers */
 .viva-reviewer-note { margin: 4px 0 8px; padding: 8px 12px; background: var(--mist); border-radius: var(--radius); }
 .comparison-set { margin: 4px 0 0; }
+
+/* Visq 2 on the student page */
+.viva-stage-note { margin: 0 0 10px; padding: 8px 12px; background: var(--blue-soft); border-radius: var(--radius); font-size: 14px; }
+.viva-example { margin: 0 0 12px; }
+.viva-example-body { margin-top: 6px; padding: 8px 12px; border: 1px dashed var(--line); border-radius: var(--radius); }
+.viva-example-body p { margin: 0 0 4px; }
+.viva-visq2-steps { margin: 4px 0 10px; padding-left: 20px; }
+.viva-note { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }

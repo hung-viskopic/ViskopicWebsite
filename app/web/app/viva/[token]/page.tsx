@@ -21,19 +21,29 @@ type Intro = {
   is_test: boolean;
   transcribed: boolean;
   camera_required: boolean;
-  /** One short follow-up may come after an answer. */
-  followups: boolean;
+  /** "visq2": Visq writes the questions during the viva (clarifying questions, an extension, a short viva). */
+  flow: "standard" | "visq2";
+  extension_seconds: number | null;
+  visq2_texts: { warning: string; ext_note: string; viva_start: string } | null;
 };
+
+type Stage = "clarify" | "extension" | "viva";
 
 type Question = {
   done: false;
-  question: { id: string; position: number; total: number; followup: boolean; text: string; passage: string | null };
+  question: {
+    id: string; position: number; total: number; followup: boolean; text: string; passage: string | null;
+    /** Visq 2 only: which step this is, and its number within the step. */
+    stage: Stage | null; stage_number: number | null; stage_total: number | null;
+  };
   answer_format: "spoken" | "typed";
   prep_seconds: number;
   answer_seconds: number;
   released_at: string;
   due_at: string;
   server_now: string;
+  /** Visq 2's extension: the most words the box takes. */
+  max_words: number | null;
 };
 
 // "waiting": the server is still deciding whether to ask a follow-up; ask again shortly.
@@ -267,7 +277,7 @@ export default function VivaPage() {
         {stage === "intro" && intro && <IntroCard intro={intro} resuming={!!session.current} error={error} onBegin={begin} />}
         {stage === "question" && q && (
           <QuestionCard key={`${q.question.id}-${loads}`} q={q} skew={skew.current} stream={stream.current}
-            camera={!!intro?.camera_required} call={call}
+            camera={!!intro?.camera_required} call={call} texts={intro?.visq2_texts ?? null}
             onPasteBlocked={(chars) => track("paste_blocked", { chars })} onSaved={loadNext} onError={setError} />
         )}
         {stage === "question" && error && <p className="error" role="alert">{error}</p>}
@@ -281,7 +291,10 @@ export default function VivaPage() {
         {stage === "finished" && (
           <div className="card narrow">
             <h1>All questions done</h1>
-            <p>You have reached the end of the {total} questions. Submit to finish. You can&apos;t change answers after this.</p>
+            <p>
+              {intro?.flow === "visq2" ? "You have answered every question." : `You have reached the end of the ${total} questions.`}
+              {" "}Submit to finish. You can&apos;t change answers after this.
+            </p>
             {error && <p className="error" role="alert">{error}</p>}
             <button className="btn" onClick={submit}>Submit answers</button>
           </div>
@@ -300,18 +313,26 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
     <div className="card narrow viva-intro">
       <h1>A short follow-up about your coursework</h1>
       <p>
-        {intro.institution_name} has asked you to answer {intro.question_count} questions about a recent piece of your
-        coursework. It takes about {Math.max(5, Math.ceil((intro.question_count * perQ * (intro.followups ? 1.5 : 1)) / 60))} minutes. Please complete it by{" "}
+        {intro.flow === "visq2"
+          ? <>{intro.institution_name} has asked you to take a short extension to a recent piece of your coursework. It takes about{" "}
+              {Math.max(10, Math.ceil(((intro.question_count + 3) * perQ + (intro.extension_seconds ?? 360)) / 60))} minutes.</>
+          : <>{intro.institution_name} has asked you to answer {intro.question_count} questions about a recent piece of your
+              coursework. It takes about {Math.max(5, Math.ceil((intro.question_count * perQ) / 60))} minutes.</>}
+        {" "}Please complete it by{" "}
         {new Date(intro.deadline_at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}.
       </p>
       <h2>How it works</h2>
       <ul>
         <li>Questions appear one at a time. You can&apos;t go back to an earlier question or see the next one early.</li>
-        {intro.followups && (
-          <li>
-            After an answer you may get one short follow-up question about what you just said. It has the same time
-            limit. A follow-up is normal and doesn&apos;t mean anything is wrong.
-          </li>
+        {intro.flow === "visq2" && (
+          <>
+            <li>
+              It has three parts: perhaps a few short questions about things your work takes for granted, then a short
+              piece of writing about a changed situation ({duration(intro.extension_seconds ?? 360)}), then{" "}
+              {intro.question_count} short questions. Some answers may get one short follow-up.
+            </li>
+            <li>Each question has a &quot;Show an example&quot; button with a worked example on a different topic.</li>
+          </>
         )}
         <li>
           Each question gives you {intro.prep_seconds > 0 ? `${duration(intro.prep_seconds)} to think, then ` : ""}
@@ -337,7 +358,7 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
         tried to paste, or opened the link on a second device. Staff on your module see this information; it is
         stored encrypted and deleted after the review. These details are only hints for the people reviewing your
         work; none of them decides anything on its own.
-        {intro.followups && " An automated system reads each answer only to choose whether to ask a follow-up. It does not mark your answers."}
+        {intro.flow === "visq2" && " An automated system reads your work and your answers only to choose the next question. It does not mark your answers."}
       </p>
       {!resuming && (
         <label className="viva-consent">
@@ -361,8 +382,23 @@ function SelfView({ stream }: { stream: MediaStream }) {
   );
 }
 
-function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, onError }: {
+function stageLabel(q: Question["question"]): string {
+  if (!q.stage) return q.followup ? `Follow-up to question ${q.position}` : `Question ${q.position} of ${q.total}`;
+  if (q.stage === "extension") return "Extension";
+  const name = q.stage === "clarify" ? "Clarifying question" : "Question";
+  if (q.followup) return `${name} ${q.stage_number ?? ""}: follow-up`;
+  return q.stage_total ? `${name} ${q.stage_number} of ${q.stage_total}` : `${name} ${q.stage_number ?? ""}`;
+}
+
+function words(t: string) {
+  return t.trim() ? t.trim().split(/\s+/).length : 0;
+}
+
+type Example = { topic: string; question: string; answer: string; reminder: string };
+
+function QuestionCard({ q, skew, stream, camera, call, texts, onPasteBlocked, onSaved, onError }: {
   q: Question;
+  texts: Intro["visq2_texts"];
   skew: number;
   stream: MediaStream | null;
   camera: boolean;
@@ -379,7 +415,19 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
   const [skipPrep, setSkipPrep] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [example, setExample] = useState<Example | null>(null);
+  const [exampleN, setExampleN] = useState(0);
   const recorder = useRef<MediaRecorder | null>(null);
+  const stage = q.question.stage;
+  const maxWords = q.max_words ?? null;
+  const overWords = maxWords !== null && words(text) > maxWords;
+
+  async function showExample() {
+    try {
+      setExample(await call<Example>("POST", "/example", JSON.stringify({ n: exampleN }), "application/json"));
+      setExampleN((n) => n + 1);
+    } catch (e) { onError((e as Error).message); }
+  }
   const chunks = useRef<Blob[]>([]);
   const finished = useRef(false);
 
@@ -455,9 +503,7 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
   return (
     <article className="card viva-question" aria-labelledby="viva-q">
       <div className="viva-question-head">
-        <p className="viva-progress">
-          {q.question.followup ? `Follow-up to question ${q.question.position}` : `Question ${q.question.position} of ${q.question.total}`}
-        </p>
+        <p className="viva-progress">{stageLabel(q.question)}</p>
         {camera && stream && stream.getVideoTracks().length > 0 && <SelfView stream={stream} />}
       </div>
       {q.question.passage && (
@@ -466,7 +512,28 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
           <p>{q.question.passage}</p>
         </blockquote>
       )}
+      {texts && (stage === "clarify" || stage === "extension") && (
+        <p className="viva-stage-note">{texts.warning} {texts.ext_note}</p>
+      )}
+      {texts && stage === "viva" && q.question.stage_number === 1 && !q.question.followup && (
+        <p className="viva-stage-note">{texts.viva_start}</p>
+      )}
       <h1 id="viva-q" className="viva-q-text">{q.question.text}</h1>
+      {stage && (
+        <div className="viva-example">
+          <button type="button" className="link" onClick={showExample}>
+            {example ? "Show another example" : "Show an example"}
+          </button>
+          {example && (
+            <div className="viva-example-body" role="note">
+              <p className="small"><strong>Example on another topic ({example.topic})</strong></p>
+              <p className="small"><em>Question:</em> {example.question}</p>
+              <p className="small"><em>Answer:</em> {example.answer}</p>
+              <p className="muted small">{example.reminder}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {!answering && (
         <div className="viva-phase">
@@ -488,14 +555,16 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
         <div className="viva-phase">
           <label className="field">
             <span>Your answer</span>
-            <textarea rows={8} value={text} maxLength={5000} autoFocus disabled={saving}
+            <textarea rows={stage === "extension" ? 14 : 8} value={text} maxLength={5000} autoFocus disabled={saving}
               onChange={(e) => setText(e.target.value)}
               onPaste={(e) => { e.preventDefault(); onPasteBlocked(e.clipboardData.getData("text").length); }}
               onDrop={(e) => e.preventDefault()} />
-            <small>{text.length} of 5,000 characters. Pasting is switched off.</small>
+            <small className={overWords ? "error" : undefined}>
+              {maxWords !== null ? `${words(text)} of ${maxWords} words.` : `${text.length} of 5,000 characters.`} Pasting is switched off.
+            </small>
           </label>
           <p className="viva-clock" aria-live="off">Time left: {clock(left)}</p>
-          <button className="btn" disabled={saving || !text.trim()} onClick={finishNow}>{saving ? "Saving…" : "Save and continue"}</button>
+          <button className="btn" disabled={saving || !text.trim() || overWords} onClick={finishNow}>{saving ? "Saving…" : "Save and continue"}</button>
         </div>
       )}
     </article>

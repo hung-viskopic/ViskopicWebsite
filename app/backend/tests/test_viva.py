@@ -59,19 +59,13 @@ def fake_ai(monkeypatch):
 
 
 @pytest.fixture
-def fake_visq(monkeypatch):
-    """Visq with its own offline stand-in model (vendor/visq_v2/visq/fake.py): no network, no spend."""
+def visq_on(monkeypatch):
+    """Visq 2 switched on with no model behind it: Visq then runs offline on its own heuristics (no network)."""
     monkeypatch.setenv("VISKOPIC_ALLOW_EXTERNAL_AI", "true")
     from viskopic.config import get_settings
     get_settings.cache_clear()
-    clients = []
-
-    def factory():
-        c = visq.modules().fake.FakeClient()
-        clients.append(c)
-        return c
-    visq.set_client_factory(factory)
-    yield clients
+    visq.set_client_factory(lambda: None)
+    yield
     visq.set_client_factory(None)
     get_settings.cache_clear()
 
@@ -130,32 +124,14 @@ def test_drafts_use_templates_when_ai_is_off(client, tenant_factory):
     assert client.post(f"/api/cases/{case_id}/viva-drafts", headers=viewer, json={"kind": "style"}).status_code == 403
 
 
-def test_visq_drafts_questions_with_passages_and_reviewer_notes(client, tenant_factory, fake_visq):
-    t = tenant_factory()
-    _, case_id, reviewer, viewer = make_case(client, t)
-    r = client.post(f"/api/cases/{case_id}/viva-drafts", headers=reviewer, json={"kind": "reasoning", "count": 4})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["provider"] == "visq" and body["engine"].startswith("visq q1.20 offline stand-in (3d631d8)")
-    qs = body["questions"]
-    assert 1 <= len(qs) <= 4 and all(q["source"] == "visq" for q in qs)
-    assert {q["qtype"] for q in qs} <= {"tradeoff", "limit", "case"}
-    assert all(q["reviewer_note"] for q in qs)
-    for q in qs:                         # passages are the submission's own text, found again in it
-        if q["passage"]:
-            assert ESSAY[q["passage_start"]:q["passage_end"]] == q["passage"]
-    # Visq saw the essay as data inside tags, and nothing was cached to disk.
-    assert any("<essay>" in u for _, u in fake_visq[0].inputs)
-    assert not (visq.VENDOR_DIR / ".visq_cache").exists()
-    assert client.post(f"/api/cases/{case_id}/viva-drafts", headers=viewer, json={"kind": "style"}).status_code == 403
-
-
 def test_vendored_visq_is_unchanged():
+    import hashlib
+    files = {p.name for p in (visq.VENDOR_DIR / "visq").glob("*.py")}
+    assert files == set(visq.FILE_SHA256)                # no stray or missing vendored module
     for name, want in visq.FILE_SHA256.items():
-        import hashlib
         assert hashlib.sha256((visq.VENDOR_DIR / "visq" / name).read_bytes()).hexdigest() == want
     m = visq.modules()
-    assert m.config.REQUIRE_ZDR and m.config.PROVIDER_PREFS == {"zdr": True}
+    assert m.visq.VERSION == 2 and m.config.REQUIRE_ZDR and m.config.PROVIDER_PREFS == {"zdr": True}
 
 
 def test_invitation_rejects_passage_not_in_submission(client, tenant_factory):
@@ -215,7 +191,7 @@ def test_spoken_viva_end_to_end(client, tenant_factory, mail, fake_ai):
     assert intro["transcribed"] is True
     assert set(intro) == {"institution_name", "status", "message", "kind", "answer_format", "question_count",
                           "prep_seconds", "answer_seconds", "deadline_at", "is_test", "transcribed", "camera_required",
-                          "followups"}
+                          "flow", "extension_seconds", "visq2_texts"}
 
     # Nothing can be written before starting.
     assert pub(client, "POST", tok, "/next").status_code == 409
@@ -465,144 +441,146 @@ def test_video_track_detection():
     assert viva_service.media_type("audio/mp4", True) == "video/mp4"
 
 
-# ------------------------------------------------------------------ Visq follow-ups
+# ------------------------------------------------------------------ Visq 2 (world-tree flow)
+
+VISQ2_ESSAY = (__import__("pathlib").Path(__file__).parent / "visq2_essay.txt").read_text()   # from Visq's own tests
+ANSWER = "Because the cost of the scheme falls on local residents, so I would limit it to the centre at peak times."
+EXTENSION = ("I would keep the main rule but weaken it for small towns, because the costs change there; I would drop "
+             "the point about pollution and add a trial period with a review.")
 
 
-def visq_questions(client, reviewer, case_id, n=2):
-    r = client.post(f"/api/cases/{case_id}/viva-drafts", headers=reviewer, json={"kind": "reasoning", "count": n})
-    assert r.status_code == 200, r.text
-    return [{k: q[k] for k in ("text", "passage", "source", "qtype", "reviewer_note")} for q in r.json()["questions"]]
+def visq2_case(client, t):
+    course, student, reviewer, viewer = reviewer_setup(client, t)
+    r = upload(client, reviewer, course, student, "essay.txt", VISQ2_ESSAY.encode(), role="submission",
+               provenance="unsupervised")
+    doc_id = r.json()["id"]
+    drain()
+    case_id = client.get(f"/api/documents/{doc_id}/vivas", headers=reviewer).json()["case"]["id"]
+    return doc_id, case_id, reviewer, viewer
 
 
-SHORT = "It depends."
-LONG = ("I think the conditions matter most here because the revenue only helps buses if the council protects it "
-        "for a long time and the road space freed by the charge is not taken back by other uses later on.")
+def visq2_invite(client, reviewer, case_id, **kw):
+    r = client.post(f"/api/cases/{case_id}/viva-invitations", headers=reviewer, json={
+        "kind": "reasoning", "flow": "visq2", "answer_format": "typed", "email": "student@example.ac.uk",
+        "prep_seconds": 0, "answer_seconds": 120, "extension_minutes": 6, **kw})
+    assert r.status_code == 201, r.text
+    return r.json()
 
 
-def test_typed_viva_with_visq_followups(client, tenant_factory, fake_visq):
+def test_visq2_viva_end_to_end(client, tenant_factory, visq_on):
     t = tenant_factory()
-    doc_id, case_id, reviewer, viewer = make_case(client, t)
-    qs = visq_questions(client, reviewer, case_id)
-    inv = invite(client, reviewer, case_id, fmt="typed", questions=qs, followups=True)
+    doc_id, case_id, reviewer, viewer = visq2_case(client, t)
+    inv = visq2_invite(client, reviewer, case_id)
     tok = token_of(inv["test_link"])
     intro = pub(client, "GET", tok).json()
-    assert intro["followups"] is True and intro["question_count"] == 2
+    assert intro["flow"] == "visq2" and intro["question_count"] == 3 and intro["extension_seconds"] == 360
+    assert intro["visq2_texts"]["warning"].startswith("This is not a viva")
     session = pub(client, "POST", tok, "/start").json()["session"]
+    # Visq hasn't read the essay yet: the page waits.
+    assert pub(client, "POST", tok, "/next", session).json()["waiting"] is True
+    drain()                                                     # visq2_prepare
 
-    q1 = pub(client, "POST", tok, "/next", session).json()["question"]
-    assert q1["position"] == 1 and q1["followup"] is False and q1["total"] == 2
-    assert "reviewer_note" not in q1 and "qtype" not in q1          # the student never sees the answer key
-    assert pub(client, "PUT", tok, f"/answers/{q1['id']}/text", session, json={"text": SHORT}).status_code == 200
-
-    # The decision isn't made yet: the page is told to wait, and cannot skip ahead.
-    w = pub(client, "POST", tok, "/next", session).json()
-    assert w["waiting"] is True and w["done"] is False and "question" not in w
-    drain()                                                           # Visq decides (the stand-in asks after a short answer)
-    f1 = pub(client, "POST", tok, "/next", session).json()["question"]
-    assert f1["followup"] is True and f1["position"] == 1 and f1["passage"] is None
-    assert pub(client, "PUT", tok, f"/answers/{f1['id']}/text", session, json={"text": LONG}).status_code == 200
-
-    # A follow-up gets no follow-up of its own: straight on to question 2.
-    q2 = pub(client, "POST", tok, "/next", session).json()["question"]
-    assert q2["position"] == 2 and q2["followup"] is False
-    assert pub(client, "PUT", tok, f"/answers/{q2['id']}/text", session, json={"text": LONG}).status_code == 200
-    drain()                                                           # detailed answer: Visq moves on
-    assert pub(client, "POST", tok, "/next", session).json() == {"done": True, "total": 2}
+    seen, examples = [], 0
+    for _ in range(25):
+        n = pub(client, "POST", tok, "/next", session).json()
+        if n.get("done"):
+            break
+        if n.get("waiting"):
+            drain()                                             # visq2_step
+            continue
+        q = n["question"]
+        assert q["stage"] in ("clarify", "extension", "viva") and q["text"]
+        seen.append((q["stage"], q["followup"]))
+        due = (__import__("datetime").datetime.fromisoformat(n["due_at"]) -
+               __import__("datetime").datetime.fromisoformat(n["released_at"])).total_seconds()
+        if q["stage"] == "extension":
+            assert round(due) == 360 and n["max_words"] == 400
+            text = EXTENSION
+        else:
+            assert round(due) == 120
+            text = ANSWER
+            if q["stage"] == "viva" and not examples:               # the "?" button: an example on another topic
+                ex = pub(client, "POST", tok, "/example", session, json={"n": 0}).json()
+                assert ex["question"] and ex["answer"] and "YOUR essay" in ex["reminder"]
+                examples += 1
+        assert pub(client, "PUT", tok, f"/answers/{q['id']}/text", session, json={"text": text}).status_code == 200
+        assert pub(client, "POST", tok, "/next", session).json()["waiting"] is True   # Visq takes the answer first
+    assert ("extension", False) in seen and sum(1 for s, f in seen if s == "viva" and not f) == 3
+    assert examples == 1
     assert pub(client, "POST", tok, "/submit", session).status_code == 200
 
     rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
-    assert rep["invitation"]["followups_enabled"] is True
-    assert rep["invitation"]["question_engine"].startswith("visq q1.20")
-    a, fa, b = rep["questions"]
-    assert a["source"] == "visq" and a["reviewer_note"] and a["qtype"] in ("tradeoff", "limit", "case")
-    assert a["followup_decision"]["action"] == "follow_up" and a["followup_decision"]["reason"] == "model"
-    assert a["followup_decision"]["why"]                              # Visq's reason, for the reviewer only
-    assert fa["source"] == "visq_followup" and fa["parent_id"] == a["id"] and fa["typed_answer"] == LONG
-    assert b["followup_decision"]["action"] == "move_on" and b["followup_decision"]["reason"] == "model"
-    assert rep["session"]["second_sessions"] == 0
+    assert rep["invitation"]["flow"] == "visq2" and rep["invitation"]["question_engine"].startswith("visq 2 world-tree")
+    assert [q["source"] for q in rep["questions"]] == ["visq2"] * len(seen)
+    assert [q["qtype"] for q in rep["questions"]] == [s for s, _ in seen]
+    ext = next(q for q in rep["questions"] if q["qtype"] == "extension")
+    assert ext["typed_answer"] == EXTENSION
+    v2 = rep["visq2"]
+    assert v2["status"] == "ready" and "offline" in v2["engine"]
+    assert v2["note"].startswith("# Viva note") and "Extension" in v2["note"]
+    assert "'?' example button was pressed" in v2["note"]
 
     with owner_conn() as c:
-        actions = [r[0] for r in c.execute("SELECT action FROM audit_log WHERE institution_id = %s "
-                                           "AND action = 'viva.followup_decided'", (t.id,)).fetchall()]
-        why = bytes(c.execute("SELECT why_ciphertext FROM viva_followup_decisions WHERE action = 'follow_up' "
-                              "AND institution_id = %s", (t.id,)).fetchone()[0])
-        with pytest.raises(psycopg.errors.RaiseException):
-            c.execute("UPDATE viva_followup_decisions SET action = 'move_on'")
-    assert len(actions) == 2 and b"fake" not in why                   # the reason is encrypted at rest
+        blob = bytes(c.execute("SELECT state_ciphertext FROM viva_visq2_states WHERE invitation_id = %s",
+                               (inv["id"],)).fetchone()[0])
+        actions = {r[0] for r in c.execute("SELECT action FROM audit_log WHERE institution_id = %s", (t.id,)).fetchall()}
+        kinds = {r[0] for r in c.execute("SELECT kind FROM viva_session_events WHERE invitation_id = %s",
+                                         (inv["id"],)).fetchall()}
+    assert b"residents" not in blob and b"air pollution" not in blob       # Visq's state is encrypted at rest
+    assert {"viva.visq2_prepared", "viva.visq2_step", "viva.submitted"} <= actions
+    assert "example_shown" in kinds and "visq2_offline_step" not in kinds
 
-    # Another institution sees none of it.
     other = tenant_factory("Other")
     with app_conn() as c:
         c.execute("SELECT set_config('app.institution_id', %s, false)", (other.id,))
-        assert c.execute("SELECT count(*) FROM viva_followup_decisions").fetchone()[0] == 0
+        assert c.execute("SELECT count(*) FROM viva_visq2_states").fetchone()[0] == 0
         c.execute("SELECT set_config('app.institution_id', '', false)")
 
 
-def test_followup_wait_times_out_and_skips_need_no_model(client, tenant_factory, fake_visq, monkeypatch):
+def test_visq2_moves_on_offline_when_the_worker_is_late(client, tenant_factory, visq_on, monkeypatch):
     t = tenant_factory()
-    _, case_id, reviewer, viewer = make_case(client, t)
-    inv = invite(client, reviewer, case_id, fmt="typed", questions=visq_questions(client, reviewer, case_id),
-                 followups=True)
+    _, case_id, reviewer, viewer = visq2_case(client, t)
+    inv = visq2_invite(client, reviewer, case_id)
     tok = token_of(inv["test_link"])
     session = pub(client, "POST", tok, "/start").json()["session"]
+    drain()
     q1 = pub(client, "POST", tok, "/next", session).json()["question"]
-    assert pub(client, "PUT", tok, f"/answers/{q1['id']}/text", session, json={"text": SHORT}).status_code == 200
+    text = EXTENSION if q1["stage"] == "extension" else ANSWER
+    assert pub(client, "PUT", tok, f"/answers/{q1['id']}/text", session, json={"text": text}).status_code == 200
     monkeypatch.setenv("VISKOPIC_VIVA_FOLLOWUP_WAIT_SECONDS", "0")
     from viskopic.config import get_settings
     get_settings.cache_clear()
-    # The worker never ran: the student is not kept waiting past the limit.
-    q2 = pub(client, "POST", tok, "/next", session).json()["question"]
-    assert q2["position"] == 2 and q2["followup"] is False
-    drain()                                   # the late job finds a decision already made and adds nothing
+    q2 = pub(client, "POST", tok, "/next", session).json()             # the worker never ran
+    assert q2.get("question") or q2.get("done")
+    drain()                                                              # the late job sees a newer state, adds nothing
     with owner_conn() as c:
-        assert c.execute("SELECT count(*) FROM viva_questions WHERE invitation_id = %s AND parent_id IS NOT NULL",
-                         (inv["id"],)).fetchone()[0] == 0
-    # Timed out without an answer: "no answer", no model call.
-    real_now = viva_service.now
-    monkeypatch.setattr(viva_service, "now", lambda: real_now() + timedelta(minutes=10))
-    assert pub(client, "POST", tok, "/next", session).json()["done"] is True
-    monkeypatch.setattr(viva_service, "now", real_now)
-    rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
-    assert [q["followup_decision"]["reason"] for q in rep["questions"]] == ["timeout", "no_answer"]
+        kinds = [r[0] for r in c.execute("SELECT kind FROM viva_session_events WHERE invitation_id = %s",
+                                         (inv["id"],)).fetchall()]
+        version = c.execute("SELECT version FROM viva_visq2_states WHERE invitation_id = %s", (inv["id"],)).fetchone()[0]
+    assert kinds.count("visq2_offline_step") == 1
+    if q2.get("question"):
+        assert q2["question"]["id"] != q1["id"]
+    assert version >= 2
 
 
-def test_spoken_followup_waits_for_the_transcript(client, tenant_factory, fake_visq, monkeypatch):
-    f = FakeAI(text=SHORT)
-    monkeypatch.setenv("VISKOPIC_VIVA_AI_PROVIDER", "fake")
+def test_visq2_rules(client, tenant_factory, visq_on, monkeypatch):
+    t = tenant_factory()
+    _, case_id, reviewer, _ = visq2_case(client, t)
+    base = {"kind": "reasoning", "flow": "visq2", "email": "s@example.ac.uk"}
+    url = f"/api/cases/{case_id}/viva-invitations"
+    r = client.post(url, headers=reviewer, json={**base, "answer_format": "spoken"})
+    assert r.status_code == 422 and "typed" in r.json()["detail"]
+    r = client.post(url, headers=reviewer, json={**base, "answer_format": "typed",
+                                                 "questions": [{"text": "What is your main argument here?"}]})
+    assert r.status_code == 422
+    r = client.post(url, headers=reviewer, json={**base, "flow": "standard", "answer_format": "typed"})
+    assert r.status_code == 422 and "at least one question" in r.json()["detail"]
+    visq.set_client_factory(None)                                        # Visq off
+    monkeypatch.setenv("VISKOPIC_ALLOW_EXTERNAL_AI", "false")
     from viskopic.config import get_settings
     get_settings.cache_clear()
-    ai.set_provider(f)
-    try:
-        t = tenant_factory()
-        _, case_id, reviewer, viewer = make_case(client, t)
-        inv = invite(client, reviewer, case_id, questions=visq_questions(client, reviewer, case_id, n=1),
-                     followups=True)
-        tok = token_of(inv["test_link"])
-        session = pub(client, "POST", tok, "/start").json()["session"]
-        q1 = pub(client, "POST", tok, "/next", session).json()["question"]
-        assert pub(client, "PUT", tok, f"/answers/{q1['id']}/audio", session, content=WEBM).status_code == 200
-        assert pub(client, "POST", tok, "/next", session).json()["waiting"] is True
-        drain()                                # transcription, then the follow-up decision from the transcript
-        f1 = pub(client, "POST", tok, "/next", session).json()["question"]
-        assert f1["followup"] is True
-        assert pub(client, "PUT", tok, f"/answers/{f1['id']}/audio", session, content=WEBM).status_code == 200
-        assert pub(client, "POST", tok, "/next", session).json()["done"] is True
-        drain()
-        rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
-        assert [q["source"] for q in rep["questions"]] == ["visq", "visq_followup"]
-        assert all(q["transcript"]["text"] == SHORT for q in rep["questions"])
-    finally:
-        ai.set_provider(None)
-        get_settings.cache_clear()
-
-
-def test_followups_need_visq_and_transcription(client, tenant_factory):
-    t = tenant_factory()
-    _, case_id, reviewer, _ = make_case(client, t)
-    r = client.post(f"/api/cases/{case_id}/viva-invitations", headers=reviewer, json={
-        "kind": "reasoning", "answer_format": "typed", "email": "s@example.ac.uk", "followups": True,
-        "questions": [{"text": "What is the main argument of your essay?", "source": "template"}]})
-    assert r.status_code == 422 and "Visq" in r.json()["detail"]
+    r = client.post(url, headers=reviewer, json={**base, "answer_format": "typed"})
+    assert r.status_code == 422 and "Visq is switched off" in r.json()["detail"]
 
 
 def test_visq_can_run_on_openai(monkeypatch):
@@ -630,6 +608,7 @@ def test_visq_can_run_on_openai(monkeypatch):
     monkeypatch.setattr(visq.httpx, "post", fake_post)
     try:
         assert visq.enabled() and "openai gpt-5.4-mini-2026-03-17" in visq.engine_label()
+        assert visq.engine_label().startswith("visq 2 world-tree")
         c = visq.client()
         assert isinstance(c, visq.OpenAIClient)
         res = c.chat("SYSTEM", "USER", temperature=0.4, max_tokens=100)

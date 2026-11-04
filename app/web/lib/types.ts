@@ -247,8 +247,10 @@ export type VivaInvitation = {
   revoked_at: string | null;
   revoke_reason: string | null;
   replaces_id: string | null;
-  followups_enabled: boolean;
   question_engine: string | null;
+  flow: "standard" | "visq2";
+  visq2_full: boolean;
+  extension_seconds: number | null;
   questions?: number;
   answered?: number;
 };
@@ -263,12 +265,8 @@ export type VivaList = {
 
 export type DraftQuestion = {
   text: string;
-  source: "visq" | "template" | "reviewer";
+  source: "template" | "reviewer";
   passage: string | null;
-  /** Visq question type (tradeoff, limit, case). */
-  qtype?: string | null;
-  /** What a good answer covers. Reviewer only: never shown to the student. */
-  reviewer_note?: string | null;
   passage_start?: number | null;
   passage_end?: number | null;
 };
@@ -339,4 +337,14 @@ export type VivaReport = {
   questions: VivaReportQuestion[];
   session: VivaSignals & { second_sessions: number };
   overall: VivaAssessment | null;
+  /** Visq 2 vivas: preparation status and Visq's reviewer note (markdown; a reading aid, never a score). */
+  visq2: {
+    status: "preparing" | "ready" | "failed" | null;
+    error: string | null;
+    engine: string | null;
+    full: boolean;
+    extension_seconds: number | null;
+    note: string | null;
+    note_error?: string;
+  } | null;
 };

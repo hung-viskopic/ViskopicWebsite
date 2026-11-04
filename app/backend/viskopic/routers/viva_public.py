@@ -3,8 +3,8 @@
 Rules enforced here, on the server, so a modified browser can't get round them:
 - One question at a time. The next question is released only after the current one is answered or its time is
   up, so questions can't be read ahead and there is no going back.
-- Follow-ups (Visq): after a main question is answered, the next release waits until the worker has decided on
-  one optional follow-up, at most `viva_followup_wait_seconds`, then moves on without one.
+- Visq 2: questions are written during the viva. After each answer the worker feeds it into Visq; the next release
+  waits for that step at most `viva_followup_wait_seconds`, then the server applies it offline (no model) and goes on.
 - Each question's deadline is measured on the server from its release (preparation + answer time). Answers
   arriving after the deadline plus a short grace period are rejected and recorded as a late write.
 - One browser session at a time. Opening the link on another device takes the session over; the first device
@@ -31,7 +31,7 @@ from ..config import get_settings
 from ..db import system_tx, tenant_tx
 from ..deps import institution_dek
 from ..storage import get_storage
-from ..viva import ai
+from ..viva import ai, visq
 from ..viva import service as viva
 
 router = APIRouter(prefix="/public/viva", tags=["viva-public"])
@@ -114,12 +114,16 @@ def intro(token: str):
         name = conn.execute("SELECT name FROM institutions WHERE id = %s", (iid,)).fetchone()["name"]
         n = conn.execute("SELECT count(*) AS n FROM viva_questions WHERE invitation_id = %s AND parent_id IS NULL",
                          (inv_id,)).fetchone()["n"]
+        if inv["flow"] == "visq2":
+            n = 3 if not inv["visq2_full"] else 7        # the short viva; clarifying questions and the extension come first
     return {
         "institution_name": name, "status": inv["status"], "message": CLOSED.get(inv["status"]),
         "kind": inv["viva_kind"], "answer_format": inv["answer_format"], "question_count": n,
         "prep_seconds": inv["prep_seconds"], "answer_seconds": inv["answer_seconds"],
         "deadline_at": inv["deadline_at"], "is_test": inv["is_test"], "camera_required": inv["camera_required"],
-        "followups": inv["followups_enabled"],
+        "flow": inv["flow"],
+        "extension_seconds": inv["extension_seconds"],
+        "visq2_texts": visq.texts() if inv["flow"] == "visq2" else None,
         "transcribed": inv["answer_format"] == "spoken" and ai.enabled(),
     }
 
@@ -153,26 +157,34 @@ def start(token: str):
 def _current(conn: Connection, inv_id: UUID) -> dict | None:
     """The most recently released question (main or follow-up), with its answer state."""
     return conn.execute(
-        "SELECT q.id, q.position, q.parent_id, q.text_ciphertext, q.passage_ciphertext, rl.released_at, rl.due_at, "
+        "SELECT q.id, q.position, q.parent_id, q.qtype, q.source, q.text_ciphertext, q.passage_ciphertext, "
+        "rl.released_at, rl.due_at, "
         "a.id AS answered FROM viva_question_releases rl JOIN viva_questions q ON q.id = rl.question_id "
         "LEFT JOIN viva_responses a ON a.question_id = q.id WHERE rl.invitation_id = %s "
         "ORDER BY rl.released_at DESC, q.parent_id IS NOT NULL DESC LIMIT 1", (inv_id,)).fetchone()
 
 
-def _question_out(conn: Connection, iid: UUID, inv: dict, q: dict, total: int) -> dict:
+def _question_out(conn: Connection, iid: UUID, inv: dict, q: dict, total: int, text: str | None = None) -> dict:
     dek = institution_dek(conn, iid)
+    if text is None:
+        text = crypto.decrypt(dek, q["text_ciphertext"], f"viva_question:{q['id']}").decode()
     return {
         "done": False,
         "question": {
             "id": q["id"], "position": q["position"], "total": total,
-            "followup": q.get("parent_id") is not None,
-            "text": crypto.decrypt(dek, q["text_ciphertext"], f"viva_question:{q['id']}").decode(),
+            "followup": q.get("parent_id") is not None or bool(q.get("stage_followup")),
+            "stage": q.get("qtype") if q.get("source") == "visq2" else None,
+            "stage_number": q.get("stage_number"), "stage_total": q.get("stage_total"),
+            "text": text,
             "passage": crypto.decrypt(dek, q["passage_ciphertext"], f"viva_passage:{q['id']}").decode()
                        if q["passage_ciphertext"] else None,
         },
         "answer_format": inv["answer_format"],
-        "prep_seconds": inv["prep_seconds"], "answer_seconds": inv["answer_seconds"],
+        # Visq 2's extension has its own clock and no think time; every other question keeps the invitation's.
+        "prep_seconds": 0 if q.get("qtype") == "extension" and q.get("source") == "visq2" else inv["prep_seconds"],
+        "answer_seconds": inv["answer_seconds"],
         "released_at": q["released_at"], "due_at": q["due_at"], "server_now": viva.now(),
+        "max_words": q.get("max_words"),
     }
 
 
@@ -182,6 +194,8 @@ def next_question(token: str, x_viva_session: str | None = Header(default=None))
     with tenant_tx(iid) as conn:
         inv = _load(conn, inv_id, lock=True)
         _session(conn, inv, x_viva_session)
+        if inv["flow"] == "visq2":
+            return _next_visq2(conn, iid, inv)
         total = conn.execute("SELECT count(*) AS n FROM viva_questions WHERE invitation_id = %s AND parent_id IS NULL",
                              (inv_id,)).fetchone()["n"]
         cur = _current(conn, inv_id)
@@ -191,21 +205,81 @@ def next_question(token: str, x_viva_session: str | None = Header(default=None))
             conn.execute("INSERT INTO viva_responses (institution_id, invitation_id, question_id, kind) "
                          "VALUES (%s,%s,%s,'skipped')", (iid, inv_id, cur["id"]))
             _event(conn, iid, inv_id, "question_timed_out", cur["id"])
-        if cur:
-            follow = viva.followup_state(conn, iid, inv, cur)
-            if follow == "wait":
-                if not conn.execute("SELECT 1 FROM viva_session_events WHERE question_id = %s AND kind = "
-                                    "'followup_waiting'", (cur["id"],)).fetchone():
-                    _event(conn, iid, inv_id, "followup_waiting", cur["id"])
-                return {"done": False, "waiting": True, "retry_after_ms": 2000, "total": total}
-            if follow is not None:
-                return _release(conn, iid, inv, follow, total)
         pos = (cur["position"] if cur else 0) + 1
         q = conn.execute("SELECT id, position, parent_id, text_ciphertext, passage_ciphertext FROM viva_questions "
                          "WHERE invitation_id = %s AND position = %s AND parent_id IS NULL", (inv_id, pos)).fetchone()
         if q is None:
             return {"done": True, "total": total}
         return _release(conn, iid, inv, q, total)
+
+
+WAITING = {"done": False, "waiting": True, "retry_after_ms": 2000}
+
+
+def _next_visq2(conn: Connection, iid: UUID, inv: dict) -> dict:
+    """Visq 2: release whatever Visq's flow asks next, as a frozen question with a server deadline."""
+    inv_id = inv["id"]
+    dek = institution_dek(conn, iid)
+    row, state = viva.load_visq2(conn, dek, inv_id, lock=True)
+    total = 7 if inv["visq2_full"] else 3
+    if row["status"] == "preparing":
+        return {**WAITING, "total": total}
+    if row["status"] == "failed" or state is None:
+        return {"done": True, "total": total}
+    cur = _current(conn, inv_id)
+    if cur and not cur["answered"]:
+        if viva.now() <= cur["due_at"]:
+            return _question_out(conn, iid, inv, _visq2_meta(cur, state), total)
+        conn.execute("INSERT INTO viva_responses (institution_id, invitation_id, question_id, kind) "
+                     "VALUES (%s,%s,%s,'skipped')", (iid, inv_id, cur["id"]))
+        _event(conn, iid, inv_id, "question_timed_out", cur["id"])
+        viva.queue_visq2_step(conn, iid, cur["id"])
+        return {**WAITING, "total": total}
+    if cur and row["applied_question_id"] != cur["id"]:
+        # The worker hasn't fed this answer into Visq yet. Wait a while, then do it here without the model.
+        saved = conn.execute("SELECT saved_at FROM viva_responses WHERE question_id = %s", (cur["id"],)).fetchone()
+        waited = (viva.now() - saved["saved_at"]).total_seconds() if saved else 0
+        if waited < get_settings().viva_followup_wait_seconds:
+            return {**WAITING, "total": total}
+        state = viva.apply_offline(conn, dek, iid, inv_id, row, state, cur)
+        _event(conn, iid, inv_id, "visq2_offline_step", cur["id"])
+        row = conn.execute("SELECT * FROM viva_visq2_states WHERE invitation_id = %s", (inv_id,)).fetchone()
+    view = visq.view(state)
+    if view["stage"] == "wv_ext_intro":
+        state = visq.start_extension(state)
+        viva.save_visq2(conn, dek, inv_id, state, expect_version=row["version"])
+        view = visq.view(state)
+    stage = viva.STAGE_QTYPE.get(view["stage"])
+    if stage is None:                                  # wv_done (or a state Visq can't continue from)
+        return {"done": True, "total": total}
+    text = view.get("question") or view.get("prompt") or ""
+    pos = conn.execute("SELECT count(*) + 1 AS n FROM viva_questions WHERE invitation_id = %s",
+                       (inv_id,)).fetchone()["n"]
+    qid = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
+    conn.execute("INSERT INTO viva_questions (id, institution_id, invitation_id, position, text_ciphertext, source, qtype) "
+                 "VALUES (%s,%s,%s,%s,%s,'visq2',%s)",
+                 (qid, iid, inv_id, pos, crypto.encrypt(dek, text.encode(), f"viva_question:{qid}"), stage))
+    seconds = (inv["extension_seconds"] if stage == "extension"
+               else inv["prep_seconds"] + inv["answer_seconds"])
+    rel = conn.execute(
+        "INSERT INTO viva_question_releases (question_id, institution_id, invitation_id, due_at) "
+        "VALUES (%s,%s,%s, now() + make_interval(secs => %s)) RETURNING released_at, due_at",
+        (qid, iid, inv_id, seconds)).fetchone()
+    _event(conn, iid, inv_id, "question_released", qid)
+    q = {"id": qid, "position": pos, "parent_id": None, "qtype": stage, "source": "visq2", "text_ciphertext": None,
+         "passage_ciphertext": None, **rel}
+    return _question_out(conn, iid, inv, _visq2_meta(q, state, view), total, text=text)
+
+
+def _visq2_meta(q: dict, state: dict, view: dict | None = None) -> dict:
+    """Stage details for the page: which step, its number, whether it is a follow-up, the extension word limit."""
+    view = view or visq.view(state)
+    out = dict(q)
+    out["stage_followup"] = bool(view.get("followup"))
+    out["stage_number"], out["stage_total"] = view.get("number"), view.get("total")
+    if q.get("qtype") == "extension":
+        out["max_words"] = view.get("max_words")
+    return out
 
 
 def _release(conn: Connection, iid: UUID, inv: dict, q: dict, total: int) -> dict:
@@ -309,8 +383,36 @@ def save_text(token: str, question_id: UUID, body: TypedIn, x_viva_session: str 
                      (rid, iid, inv_id, question_id, crypto.encrypt(dek, body.text.encode(), f"viva_response:{rid}"),
                       taken))
         _event(conn, iid, inv_id, "answer_saved", question_id, {"chars": len(body.text), "seconds_taken": taken})
-        viva.queue_followup(conn, iid, question_id)
+        if inv["flow"] == "visq2":
+            viva.queue_visq2_step(conn, iid, question_id)
     return {"ok": True}
+
+
+class ExampleIn(BaseModel):
+    n: int = Field(default=0, ge=0, le=50)
+
+
+@router.post("/{token}/example", dependencies=[Depends(rate_limit)])
+def example(token: str, body: ExampleIn, x_viva_session: str | None = Header(default=None)):
+    """Visq 2's "?" button: a worked example on a different topic. Counted, and shown to the reviewer as context."""
+    iid, inv_id = _resolve(token)
+    with tenant_tx(iid) as conn:
+        inv = _load(conn, inv_id, lock=True)
+        _session(conn, inv, x_viva_session)
+        if inv["flow"] != "visq2":
+            raise HTTPException(404, "no examples for this viva")
+        cur = _current(conn, inv_id)
+        if cur is None or cur["answered"]:
+            raise HTTPException(409, "there is no question to show an example for")
+        dek = institution_dek(conn, iid)
+        row, state = viva.load_visq2(conn, dek, inv_id, lock=True)
+        try:
+            ex, state = visq.example(state, body.n)
+        except visq.VisqStateError as e:
+            raise HTTPException(409, str(e)) from e
+        viva.save_visq2(conn, dek, inv_id, state, expect_version=row["version"])
+        _event(conn, iid, inv_id, "example_shown", cur["id"], {"n": body.n})
+    return ex
 
 
 # ------------------------------------------------------------------ browser signals and submit

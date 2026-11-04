@@ -160,28 +160,39 @@ Milestone 6c added ([`0007_visq_and_p2.sql`](../app/backend/migrations/0007_visq
 `assignment_comparison_sets` (Pipeline 2's AI essays per assignment, AI text only). Jobs gained `viva_followup` and
 `build_comparison_set`; the worker takes viva jobs first because a student may be waiting.
 
+Visq 2 added ([`0008_visq2.sql`](../app/backend/migrations/0008_visq2.sql)): `viva_invitations.flow`
+(`standard` / `visq2`), the full-set switch and extension time; `viva_visq2_states` (Visq's state per invitation,
+encrypted, versioned); question source `visq2`; jobs `visq2_prepare` and `visq2_step`. The Visq 1 follow-up
+columns and table from 0007 are kept for old vivas but no longer written.
+
 Next milestones add: `segments` (with pgvector embeddings), `evaluator_configs`, `evaluations`, `decisions`,
 `appeals`, and the later supervision modes (live, invigilated room, third-party proctor).
 
 ### Viva MVP (6a/6b)
 
-A reviewer sends a viva from a submission. Questions come from the template bank or, with external AI switched on
-(local testing with synthetic essays only), are written by **Visq**, the model team's viva engine (vendored
-unchanged in `app/backend/vendor/visq_v2`, commit `3d631d8`, Visq 1 prompts `q1.20`). Visq reads the essay's
-argument structure (claims, reasons, evidence, objections) and writes trade-off, what-if and new-case questions the
-author can reason through and a reader cannot simply look up; code checks every question (one question, plain words,
-no invented facts or numbers, no AI/cheating words, no long copying from the essay) and a second call proofreads it.
-Each question comes with a reviewer-only note on what a good answer covers and, where it can be found, the essay
-passage it is about. The reviewer edits and approves every main question. Visq runs through OpenRouter with zero
-data retention required on every call (or on OpenAI with `VISKOPIC_VISQ_PROVIDER=openai`, see decision 0009) and
-never writes to disk.
+A reviewer sends a viva from a submission, in one of two flows.
 
-**Follow-ups.** With the option on, after each main answer Visq decides once: ask one short follow-up (only when the
-answer gives no reason, stays generic or pulls against the essay) or move on. A worker job decides from the typed
-answer or the transcript; the student page shows "Preparing the next question" until then, and after
-`VISKOPIC_VIVA_FOLLOWUP_WAIT_SECONDS` (90 s) the server moves on without one, so a slow model never traps a student.
-Follow-ups are the one kind of question not approved in advance (decision 0009); they get the same time limits,
-are labelled everywhere, and the report shows Visq's reason for each decision.
+**Visq 2** (default when external AI is on; local testing with synthetic essays only). The model team's viva engine
+(vendored unchanged in `app/backend/vendor/visq_v2`, commit `3d631d8`) runs its world-tree flow
+([`0008_visq2.sql`](../app/backend/migrations/0008_visq2.sql)). A worker job reads the essay as a tree of points and
+what it takes for granted. During the viva Visq asks clarifying questions only where the essay is silent, then a
+timed, typed **extension** (a what-if from outside the essay: what would you keep, drop or add), then a short viva
+(3 questions, or 7 with the full set) sampled from fixed types, some with one follow-up, each with a worked example
+on another topic on request. Questions depend on earlier answers, so they are written during the viva and not
+approved in advance (decision 0009); each is frozen in `viva_questions` (source `visq2`, its step in `qtype`) when
+released, with a server deadline. After each answer a `visq2_step` job feeds it into Visq; the page shows "Preparing
+the next question", and after `VISKOPIC_VIVA_FOLLOWUP_WAIT_SECONDS` (90 s) the server applies the step offline with
+Visq's heuristics. Visq's state is stored encrypted and versioned in `viva_visq2_states`. The report shows every
+step with its answer and Visq's reviewer note, which compares the wording of the answers with the essay's structure
+(a reading aid, never a score). Answers are typed with paste blocked.
+
+**The reviewer's own questions** (always available): from the template bank or written by the reviewer, approved
+before sending, spoken (optionally with webcam) or typed. The rest of this section applies to both flows.
+
+Visq 1 (questions drafted from the essay's argument structure plus answer-driven follow-ups) was briefly used and
+is replaced by Visq 2; vivas sent with it keep their questions and follow-up decisions in the report. Visq runs
+through OpenRouter with zero data retention required on every call, or on OpenAI with `VISKOPIC_VISQ_PROVIDER=openai`
+(see decision 0009), and never writes to disk.
 
 The student opens an emailed link (no staff login) and answers one question at a time. Rules enforced on the
 server: a question is released only after the previous one is answered or timed out (no reading ahead, no going
@@ -261,7 +272,7 @@ option to deploy into the university's own cloud account.
 5. ✅ Pipeline contract, document-signal pipeline, **real Δ (V1.3)** through the model team's website contract with
    quality reviews, α/β placeholders, evidence report UI; **Pipeline 2 (interchangeability)** in the β slot with
    per-assignment AI comparison essays, and the combined either-flags report
-6. 🟡 Viva MVP ✅ (invitations, Visq-written questions with reviewer notes and optional Visq follow-ups, timed
+6. 🟡 Viva MVP ✅ (invitations, Visq 2 world-tree vivas or the reviewer's own questions, timed
    spoken/typed answers enforced by the server, transcripts, speech timeline, signals, report and ratings). 🔜 Evaluator with versioned θ, live and
    invigilated supervision, decisions, appeals
 7. 🔜 Real α (semantic) pipeline; Pipeline 2's Qwen and Gemma comparison families (needs an Ollama GPU host); a validated Δ student configuration (fewer, shorter
