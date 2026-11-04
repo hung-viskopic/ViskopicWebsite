@@ -191,7 +191,7 @@ def test_spoken_viva_end_to_end(client, tenant_factory, mail, fake_ai):
     assert intro["transcribed"] is True
     assert set(intro) == {"institution_name", "status", "message", "kind", "answer_format", "question_count",
                           "prep_seconds", "answer_seconds", "deadline_at", "is_test", "transcribed", "camera_required",
-                          "flow", "extension_seconds", "visq2_texts"}
+                          "flow", "extension_seconds", "visq2_texts", "fullscreen_required"}
 
     # Nothing can be written before starting.
     assert pub(client, "POST", tok, "/next").status_code == 409
@@ -568,8 +568,8 @@ def test_visq2_rules(client, tenant_factory, visq_on, monkeypatch):
     _, case_id, reviewer, _ = visq2_case(client, t)
     base = {"kind": "reasoning", "flow": "visq2", "email": "s@example.ac.uk"}
     url = f"/api/cases/{case_id}/viva-invitations"
-    r = client.post(url, headers=reviewer, json={**base, "answer_format": "spoken"})
-    assert r.status_code == 422 and "typed" in r.json()["detail"]
+    r = client.post(url, headers=reviewer, json={**base, "answer_format": "spoken"})   # transcription is off here
+    assert r.status_code == 422 and "transcription" in r.json()["detail"]
     r = client.post(url, headers=reviewer, json={**base, "answer_format": "typed",
                                                  "questions": [{"text": "What is your main argument here?"}]})
     assert r.status_code == 422
@@ -622,3 +622,77 @@ def test_visq_can_run_on_openai(monkeypatch):
         assert not visq.enabled()                    # no key, no Visq
     finally:
         get_settings.cache_clear()
+
+
+def test_spoken_visq2_viva_goes_through_transcripts(client, tenant_factory, visq_on, monkeypatch):
+    """Spoken Visq 2: clarifying and viva answers are recorded and transcribed before Visq reads them; the
+    extension stays typed."""
+    f = FakeAI(text=ANSWER)
+    monkeypatch.setenv("VISKOPIC_VIVA_AI_PROVIDER", "fake")
+    from viskopic.config import get_settings
+    get_settings.cache_clear()
+    ai.set_provider(f)
+    try:
+        t = tenant_factory()
+        _, case_id, reviewer, viewer = visq2_case(client, t)
+        inv = visq2_invite(client, reviewer, case_id, answer_format="spoken", camera=False)
+        tok = token_of(inv["test_link"])
+        intro = pub(client, "GET", tok).json()
+        assert intro["answer_format"] == "spoken" and intro["fullscreen_required"] is True and intro["transcribed"]
+        session = pub(client, "POST", tok, "/start").json()["session"]
+        drain()
+        stages = []
+        for _ in range(25):
+            n = pub(client, "POST", tok, "/next", session).json()
+            if n.get("done"):
+                break
+            if n.get("waiting"):
+                drain()                                   # transcription, then the Visq step
+                continue
+            q = n["question"]
+            stages.append(q["stage"])
+            if q["stage"] == "extension":
+                assert n["answer_format"] == "typed"
+                assert pub(client, "PUT", tok, f"/answers/{q['id']}/audio", session, content=WEBM).status_code == 422
+                assert pub(client, "PUT", tok, f"/answers/{q['id']}/text", session,
+                           json={"text": EXTENSION}).status_code == 200
+            else:
+                assert n["answer_format"] == "spoken"
+                assert pub(client, "PUT", tok, f"/answers/{q['id']}/text", session,
+                           json={"text": "typed"}).status_code == 422
+                assert pub(client, "PUT", tok, f"/answers/{q['id']}/audio", session, content=WEBM).status_code == 200
+        assert "extension" in stages and stages.count("viva") >= 3
+        assert pub(client, "POST", tok, "/submit", session).status_code == 200
+        rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
+        spoken = [q for q in rep["questions"] if q["qtype"] != "extension"]
+        assert all(q["answer_kind"] == "spoken" and q["transcript"]["text"] == ANSWER for q in spoken)
+        assert ANSWER[:40] in rep["visq2"]["note"]           # Visq read the transcripts, not empty answers
+        with owner_conn() as c:
+            kinds = [r[0] for r in c.execute("SELECT kind FROM viva_session_events WHERE invitation_id = %s",
+                                             (inv["id"],)).fetchall()]
+        assert "visq2_offline_step" not in kinds
+    finally:
+        ai.set_provider(None)
+        get_settings.cache_clear()
+
+
+def test_copy_and_fullscreen_signals(client, tenant_factory):
+    t = tenant_factory()
+    _, case_id, reviewer, viewer = make_case(client, t)
+    inv = invite(client, reviewer, case_id, fmt="typed", fullscreen=False)
+    assert pub(client, "GET", token_of(inv["test_link"])).json()["fullscreen_required"] is False
+    inv = invite(client, reviewer, case_id, fmt="typed")                  # the default: full screen required
+    tok = token_of(inv["test_link"])
+    assert pub(client, "GET", tok).json()["fullscreen_required"] is True
+    session = pub(client, "POST", tok, "/start").json()["session"]
+    q = pub(client, "POST", tok, "/next", session).json()["question"]
+    assert pub(client, "POST", tok, "/events", session, json={"events": [
+        {"kind": "copy_blocked", "question_id": q["id"], "detail": {"chars": 120}},
+        {"kind": "fullscreen_exit", "question_id": q["id"]},
+        {"kind": "fullscreen_back", "question_id": q["id"], "detail": {"seconds": 12.5}},
+        {"kind": "fullscreen_exit", "question_id": q["id"]},
+        {"kind": "fullscreen_back", "question_id": q["id"], "detail": {"seconds": 3}}]}).status_code == 200
+    rep = client.get(f"/api/viva-invitations/{inv['id']}/report", headers=viewer).json()
+    assert rep["invitation"]["fullscreen_required"] is True
+    sig = rep["questions"][0]["signals"]
+    assert sig["copy_blocked"] == 1 and sig["fullscreen_exit"] == 2 and sig["fullscreen_out_seconds"] == 15.5

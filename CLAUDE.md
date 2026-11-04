@@ -101,16 +101,18 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 - ✅ Visq 2 world-tree vivas (`0008_visq2.sql`, `viskopic/viva/visq.py`): flow `visq2` on an invitation. Visq reads
   the essay (`visq2_prepare` job), then during the viva writes clarifying questions, a timed typed extension and a
   short viva; each answer is fed in by a `visq2_step` job, and after `viva_followup_wait_seconds` the API applies
-  the step offline. Visq's state is encrypted in `viva_visq2_states` (versioned writes). Typed answers only. Visq 1
+  the step offline. Visq's state is encrypted in `viva_visq2_states` (versioned writes). Typed or spoken answers
+  (spoken ones are transcribed first; the extension is always typed). Visq 1
   (drafted questions + follow-ups, 0007) is replaced; its tables stay for old vivas.
 - ✅ Viva MVP (6a/6b, `0005_viva.sql`, `routers/viva.py`, `routers/viva_public.py`, `viskopic/viva/`): reviewer sends
   a viva from a submission; student answers by token link, one server-released question at a time, spoken
   (recorded) or typed (paste blocked), deadlines enforced on the server, one session at a time. Report with
   recording, transcript, speech timeline, signals and per-answer ratings. Mailpit for email. Optional webcam
   recording (`0006_viva_camera.sql`, supervision mode `oral_video`): video for a person to watch, never analysed.
-  18 viva tests.
+  Full screen required by default (`0009`, laptop/desktop only; leaving it covers the question, the clock keeps
+  running); copying the question is blocked. 20 viva tests.
 - 🔜 Next: evaluator with versioned θ → live/invigilated supervision → decisions with evidence snapshot →
-  appeals; an Ollama GPU host for the AI comparison's Qwen/Gemma families. 57 backend tests in total.
+  appeals; an Ollama GPU host for the AI comparison's Qwen/Gemma families. 59 backend tests in total.
 
 ## Working conventions
 

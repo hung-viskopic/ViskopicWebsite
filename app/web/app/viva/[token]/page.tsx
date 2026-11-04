@@ -21,6 +21,8 @@ type Intro = {
   is_test: boolean;
   transcribed: boolean;
   camera_required: boolean;
+  /** Full screen required: laptop/desktop browsers only; leaving it covers the question until the student returns. */
+  fullscreen_required: boolean;
   /** "visq2": Visq writes the questions during the viva (clarifying questions, an extension, a short viva). */
   flow: "standard" | "visq2";
   extension_seconds: number | null;
@@ -54,6 +56,13 @@ class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+/** Full screen works here and this looks like a laptop or desktop (a precise pointer, not only a touchscreen). */
+function fullscreenCapable(): boolean {
+  if (typeof document === "undefined") return true;
+  const touchOnly = window.matchMedia?.("(pointer: coarse)").matches && !window.matchMedia?.("(any-pointer: fine)").matches;
+  return !!document.fullscreenEnabled && !touchOnly;
 }
 
 function store(key: string, value?: string | null) {
@@ -101,6 +110,8 @@ export default function VivaPage() {
   const events = useRef<BrowserEvent[]>([]);
   const currentQ = useRef<string | undefined>(undefined);
   const skew = useRef(0); // server clock minus browser clock, ms
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fsExitAt = useRef<number | null>(null);
 
   const call = useCallback(async <T,>(method: string, path: string, body?: BodyInit, contentType?: string): Promise<T> => {
     const headers: Record<string, string> = {};
@@ -146,7 +157,25 @@ export default function VivaPage() {
     const onVis = () => track(document.hidden ? "focus_lost" : "focus_back");
     const onBlur = () => !document.hidden && track("focus_lost");
     const onFocus = () => track("focus_back");
-    const onFs = () => !document.fullscreenElement && track("fullscreen_exit");
+    const onFs = () => {
+      const on = !!document.fullscreenElement;
+      setIsFullscreen(on);
+      if (!on) {
+        fsExitAt.current = Date.now();
+        track("fullscreen_exit");
+      } else if (fsExitAt.current !== null) {
+        track("fullscreen_back", { seconds: Math.round((Date.now() - fsExitAt.current) / 100) / 10 });
+        fsExitAt.current = null;
+      }
+    };
+    // Copying the question (or anything outside the answer box) is blocked and recorded, like pasting.
+    const onCopy = (e: ClipboardEvent) => {
+      if (document.activeElement instanceof HTMLTextAreaElement) return;   // copying within their own answer is fine
+      e.preventDefault();
+      track("copy_blocked", { chars: (window.getSelection()?.toString() ?? "").length });
+    };
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCopy);
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
@@ -157,6 +186,8 @@ export default function VivaPage() {
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCopy);
       clearInterval(t);
     };
   }, [stage, track, flush]);
@@ -219,7 +250,10 @@ export default function VivaPage() {
         session.current = r.session;
         store(`viva:${token}`, r.session);
       }
-      document.documentElement.requestFullscreen?.().catch(() => {});
+      // Best effort here: after a microphone prompt the browser may refuse; the "return to full screen" panel
+      // then asks for one more click.
+      await document.documentElement.requestFullscreen?.().catch(() => {});
+      setIsFullscreen(!!document.fullscreenElement);
       await loadNext();
     } catch (e) {
       const err = e as HttpError;
@@ -275,10 +309,24 @@ export default function VivaPage() {
           </div>
         )}
         {stage === "intro" && intro && <IntroCard intro={intro} resuming={!!session.current} error={error} onBegin={begin} />}
+        {stage === "question" && q && intro?.fullscreen_required && !isFullscreen && (
+          <div className="card narrow viva-fullscreen" role="alertdialog" aria-labelledby="viva-fs-title">
+            <h1 id="viva-fs-title">Return to full screen</h1>
+            <p>This conversation needs to fill your screen. The question is hidden until you return; your answer so far is kept.</p>
+            <p className="muted small">The clock keeps running. Leaving full screen is recorded for the people reviewing your work.</p>
+            <button className="btn" autoFocus
+              onClick={() => document.documentElement.requestFullscreen?.().catch(() => setError("Your browser did not allow full screen. Try again, or press F11."))}>
+              Return to full screen
+            </button>
+            {error && <p className="error" role="alert">{error}</p>}
+          </div>
+        )}
         {stage === "question" && q && (
+          <div hidden={!!intro?.fullscreen_required && !isFullscreen}>
           <QuestionCard key={`${q.question.id}-${loads}`} q={q} skew={skew.current} stream={stream.current}
             camera={!!intro?.camera_required} call={call} texts={intro?.visq2_texts ?? null}
             onPasteBlocked={(chars) => track("paste_blocked", { chars })} onSaved={loadNext} onError={setError} />
+          </div>
         )}
         {stage === "question" && error && <p className="error" role="alert">{error}</p>}
         {stage === "waiting" && (
@@ -306,6 +354,19 @@ export default function VivaPage() {
 
 function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming: boolean; error: string | null; onBegin: () => void }) {
   const [agreed, setAgreed] = useState(resuming);
+  const [capable] = useState(fullscreenCapable);
+  if (intro.fullscreen_required && !capable) {
+    return (
+      <div className="card narrow viva-intro">
+        <h1>Please use a laptop or desktop computer</h1>
+        <p>
+          This follow-up conversation runs in full screen, which this device or browser doesn&apos;t support. Open the
+          same link on a laptop or desktop computer, in an up-to-date Chrome, Edge, Firefox or Safari.
+        </p>
+        <p className="muted small">If you can&apos;t use one, or full screen doesn&apos;t work with tools you rely on, contact your module team.</p>
+      </div>
+    );
+  }
   const [busy, setBusy] = useState(false);
   const spoken = intro.answer_format === "spoken";
   const perQ = intro.prep_seconds + intro.answer_seconds;

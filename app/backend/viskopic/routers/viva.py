@@ -49,7 +49,8 @@ def _submission_text(conn: Connection, institution_id: UUID, document_id: UUID) 
 
 INVITATION_COLS = ("id, viva_kind, answer_format, supervision_mode, camera_required, status, deadline_at, prep_seconds, answer_seconds, "
                    "is_test, last_error, created_at, sent_at, opened_at, started_at, submitted_at, revoked_at, "
-                   "revoke_reason, replaces_id, question_engine, flow, visq2_full, extension_seconds")
+                   "revoke_reason, replaces_id, question_engine, flow, visq2_full, extension_seconds, "
+                   "fullscreen_required")
 
 
 # ------------------------------------------------------------------ list and draft
@@ -117,6 +118,9 @@ class InvitationIn(BaseModel):
     flow: Literal["standard", "visq2"] = "standard"
     questions: list[QuestionIn] = Field(default_factory=list, max_length=8)
     visq2_full: bool = False                                    # 7 viva questions instead of 3
+    # Laptop/desktop browsers only; leaving full screen covers the question until the student returns.
+    # Switch off for students whose assistive tools don't work in full screen.
+    fullscreen: bool = True
     extension_minutes: int = Field(default=6, ge=1, le=30)      # time for Visq 2's typed extension
 
 
@@ -131,8 +135,8 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
     if body.flow == "visq2":
         if not visq.enabled():
             raise HTTPException(422, "Visq is switched off (VISKOPIC_ALLOW_EXTERNAL_AI and a model key)")
-        if body.answer_format != "typed" or body.camera:
-            raise HTTPException(422, "a Visq 2 viva takes typed answers")
+        if body.answer_format == "spoken" and not ai.enabled():
+            raise HTTPException(422, "spoken Visq 2 answers need transcription, which is switched off")
         if body.questions:
             raise HTTPException(422, "Visq 2 writes its own questions during the viva")
     elif not body.questions:
@@ -152,32 +156,33 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
     out = _issue(conn, p, case_id, body.kind, body.answer_format, str(body.email), body.deadline_days,
                  body.prep_seconds, body.answer_seconds, questions, replaces=None, camera=body.camera,
                  engine=engine, flow=body.flow, visq2_full=body.visq2_full,
-                 extension_seconds=body.extension_minutes * 60 if body.flow == "visq2" else None)
+                 extension_seconds=body.extension_minutes * 60 if body.flow == "visq2" else None,
+                 fullscreen=body.fullscreen)
     audit.record(conn, p, "viva.invitation_created", "viva_invitation", out["id"],
                  {"case_id": str(case_id), "kind": body.kind, "format": body.answer_format, "camera": body.camera,
                   "questions": len(questions), "sources": sorted({q["source"] for q in questions}),
-                  "flow": body.flow, "engine": engine})
+                  "flow": body.flow, "engine": engine, "fullscreen": body.fullscreen})
     return out
 
 
 def _issue(conn: Connection, p: Principal, case_id: UUID, kind: str, fmt: str, email: str, deadline_days: int,
            prep: int, answer: int, questions: list[dict], replaces: UUID | None, camera: bool = False,
            engine: str | None = None, flow: str = "standard", visq2_full: bool = False,
-           extension_seconds: int | None = None) -> dict:
+           extension_seconds: int | None = None, fullscreen: bool = False) -> dict:
     dek = institution_dek(conn, p.institution_id)
     token = viva.new_token()
     inv_id = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
     conn.execute(
         "INSERT INTO viva_invitations (id, institution_id, case_id, viva_kind, answer_format, supervision_mode, "
         "camera_required, token_sha256, token_ciphertext, email_ciphertext, deadline_at, prep_seconds, answer_seconds, "
-        "created_by, replaces_id, question_engine, flow, visq2_full, extension_seconds) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "created_by, replaces_id, question_engine, flow, visq2_full, extension_seconds, fullscreen_required) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (inv_id, p.institution_id, case_id, kind, fmt,
          "restricted" if fmt == "typed" else "oral_video" if camera else "oral_recorded", camera,
          viva.token_hash(token), crypto.encrypt(dek, token.encode(), f"viva_token:{inv_id}"),
          crypto.encrypt(dek, email.encode(), f"viva_invitation_email:{inv_id}"),
          viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces, engine, flow, visq2_full,
-         extension_seconds))
+         extension_seconds, fullscreen))
     if flow == "visq2":
         # Visq reads the essay in the worker; the student page waits ("one moment") if they open it before then.
         conn.execute("INSERT INTO viva_visq2_states (invitation_id, institution_id) VALUES (%s, %s)",
@@ -226,7 +231,8 @@ def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     out = _issue(conn, p, inv["case_id"], inv["viva_kind"], inv["answer_format"], email, min(remaining, 30),
                  inv["prep_seconds"], inv["answer_seconds"], questions, replaces=invitation_id,
                  camera=inv["camera_required"], engine=inv["question_engine"], flow=inv["flow"],
-                 visq2_full=inv["visq2_full"], extension_seconds=inv["extension_seconds"])
+                 visq2_full=inv["visq2_full"], extension_seconds=inv["extension_seconds"],
+                 fullscreen=inv["fullscreen_required"])
     audit.record(conn, p, "viva.invitation_resent", "viva_invitation", out["id"], {"replaces": str(invitation_id)})
     return out
 
@@ -331,8 +337,9 @@ def _decision_out(d: dict | None, dec) -> dict | None:
 
 def _summarise(events: list[dict]) -> dict:
     """Neutral counts for the reviewer. Browser-reported events are self-reported and can be suppressed."""
-    out = {"focus_lost": 0, "away_seconds": 0.0, "paste_blocked": 0, "fullscreen_exit": 0, "late_write": 0,
-           "timed_out": False, "mic_unavailable": False, "camera_unavailable": False}
+    out = {"focus_lost": 0, "away_seconds": 0.0, "paste_blocked": 0, "copy_blocked": 0, "fullscreen_exit": 0,
+           "fullscreen_out_seconds": 0.0, "late_write": 0, "timed_out": False, "mic_unavailable": False,
+           "camera_unavailable": False}
     lost_at = None
     for e in events:
         k = e["kind"]
@@ -342,13 +349,16 @@ def _summarise(events: list[dict]) -> dict:
         elif k == "focus_back" and lost_at is not None:
             out["away_seconds"] += (e["at"] - lost_at).total_seconds()
             lost_at = None
-        elif k in ("paste_blocked", "fullscreen_exit", "late_write"):
+        elif k in ("paste_blocked", "copy_blocked", "fullscreen_exit", "late_write"):
             out[k] += 1
+        elif k == "fullscreen_back":   # the page reports how long it was out of full screen
+            out["fullscreen_out_seconds"] += float((e.get("detail") or {}).get("seconds", 0))
         elif k == "question_timed_out":
             out["timed_out"] = True
         elif k in ("mic_unavailable", "camera_unavailable"):
             out[k] = True
     out["away_seconds"] = round(out["away_seconds"], 1)
+    out["fullscreen_out_seconds"] = round(out["fullscreen_out_seconds"], 1)
     return out
 
 

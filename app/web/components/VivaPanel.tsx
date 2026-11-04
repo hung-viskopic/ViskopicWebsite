@@ -103,9 +103,9 @@ function InvitationActions({ id, status, onDone }: { id: string; status: string;
   );
 }
 
-function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
+function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
   caseId: string;
-  /** Transcription of spoken answers (not used by Visq 2, which is typed). */
+  /** Transcription of spoken answers (Visq 2 needs it for spoken answers). */
   aiEnabled: boolean;
   /** Visq 2 world-tree vivas. */
   visqEnabled: boolean;
@@ -118,10 +118,14 @@ function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
   const [format, setFormat] = useState<"spoken" | "typed">("spoken");
   const [camera, setCamera] = useState(true);
   const [full, setFull] = useState(false);
+  const [fullscreen, setFullscreen] = useState(true);
   const [questions, setQuestions] = useState<DraftQuestion[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const visq2 = flow === "visq2";
+  // Spoken Visq 2 answers are transcribed before Visq reads them, so transcription must be on.
+  const spokenPossible = !visq2 || aiEnabled;
+  const fmt = spokenPossible ? format : "typed";
 
   async function draft() {
     setBusy("draft");
@@ -154,8 +158,9 @@ function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
         method: "POST",
         body: JSON.stringify({
           kind, flow, email: form.get("email"),
-          answer_format: visq2 ? "typed" : format,
-          camera: !visq2 && format === "spoken" && camera,
+          answer_format: fmt,
+          camera: fmt === "spoken" && camera,
+          fullscreen,
           deadline_days: Number(form.get("deadline_days")),
           prep_seconds: Number(form.get("prep_seconds")),
           answer_seconds: Number(form.get("answer_seconds")),
@@ -185,15 +190,14 @@ function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
             <option value="style">Style: how it was written</option>
           </select>
         </Field>
-        {!visq2 && (
-          <Field label="Answers" hint={format === "spoken" ? "Recorded in the browser" : "Paste is blocked"}>
-            <select value={format} onChange={(e) => setFormat(e.target.value as "spoken" | "typed")}>
-              <option value="spoken">Spoken (recommended)</option>
-              <option value="typed">Typed (accessibility alternative)</option>
-            </select>
-          </Field>
-        )}
-        {!visq2 && format === "spoken" && (
+        <Field label="Answers"
+          hint={fmt === "spoken" ? (visq2 ? "Recorded and transcribed; the extension stays typed" : "Recorded in the browser") : "Paste is blocked"}>
+          <select value={fmt} onChange={(e) => setFormat(e.target.value as "spoken" | "typed")}>
+            {spokenPossible && <option value="spoken">Spoken (recommended)</option>}
+            <option value="typed">Typed{spokenPossible ? " (accessibility alternative)" : ""}</option>
+          </select>
+        </Field>
+        {fmt === "spoken" && (
           <label className="viva-camera-option">
             <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} />
             <span>
@@ -202,6 +206,13 @@ function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
             </span>
           </label>
         )}
+        <label className="viva-camera-option">
+          <input type="checkbox" checked={fullscreen} onChange={(e) => setFullscreen(e.target.checked)} />
+          <span>
+            Require full screen
+            <small>Laptop or desktop only. Leaving full screen hides the question until the student returns, and is recorded. Untick for students whose assistive tools don&apos;t work in full screen.</small>
+          </span>
+        </label>
       </div>
 
       {visq2 ? (
@@ -216,7 +227,8 @@ function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
           <p className="note small">
             Visq writes the questions during the viva, so you don&apos;t approve them first; the report shows every
             question with its answer, plus Visq&apos;s note comparing the wording with the essay (a reading aid, not a
-            score). Answers are typed, with paste blocked. The essay and answers go to an outside model. Test data only.
+            score). Spoken answers are transcribed before Visq reads them; the extension is always typed. Copying and
+            pasting are blocked. The essay and answers go to an outside model. Test data only.
           </p>
           <label className="viva-camera-option">
             <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} />

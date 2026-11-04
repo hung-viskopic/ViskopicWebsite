@@ -438,3 +438,8 @@ ul.chips { list-style: none; padding: 0; margin-left: 0; }
 .viva-example-body p { margin: 0 0 4px; }
 .viva-visq2-steps { margin: 4px 0 10px; padding-left: 20px; }
 .viva-note { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+
+/* Viva: the question can't be selected or copied (the answer box can); the full-screen panel */
+.viva-question .viva-q-text, .viva-question .viva-passage, .viva-question .viva-progress, .viva-question .viva-stage-note,
+.viva-question .viva-example-body { user-select: none; -webkit-user-select: none; }
+.viva-fullscreen { text-align: center; }

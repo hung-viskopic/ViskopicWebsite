@@ -122,6 +122,7 @@ def intro(token: str):
         "prep_seconds": inv["prep_seconds"], "answer_seconds": inv["answer_seconds"],
         "deadline_at": inv["deadline_at"], "is_test": inv["is_test"], "camera_required": inv["camera_required"],
         "flow": inv["flow"],
+        "fullscreen_required": inv["fullscreen_required"],
         "extension_seconds": inv["extension_seconds"],
         "visq2_texts": visq.texts() if inv["flow"] == "visq2" else None,
         "transcribed": inv["answer_format"] == "spoken" and ai.enabled(),
@@ -179,7 +180,7 @@ def _question_out(conn: Connection, iid: UUID, inv: dict, q: dict, total: int, t
             "passage": crypto.decrypt(dek, q["passage_ciphertext"], f"viva_passage:{q['id']}").decode()
                        if q["passage_ciphertext"] else None,
         },
-        "answer_format": inv["answer_format"],
+        "answer_format": _answer_format(inv, q),
         # Visq 2's extension has its own clock and no think time; every other question keeps the invitation's.
         "prep_seconds": 0 if q.get("qtype") == "extension" and q.get("source") == "visq2" else inv["prep_seconds"],
         "answer_seconds": inv["answer_seconds"],
@@ -291,12 +292,20 @@ def _release(conn: Connection, iid: UUID, inv: dict, q: dict, total: int) -> dic
     return _question_out(conn, iid, inv, {**q, **rel}, total)
 
 
+def _answer_format(inv: dict, q: dict) -> str:
+    """Visq 2's extension is always typed; everything else follows the invitation."""
+    if q.get("source") == "visq2" and q.get("qtype") == "extension":
+        return "typed"
+    return inv["answer_format"]
+
+
 def _check_answerable(conn: Connection, iid: UUID, inv: dict, question_id: UUID, fmt: str) -> dict:
-    if inv["answer_format"] != fmt:
-        raise HTTPException(422, f"this viva takes {inv['answer_format']} answers")
     cur = _current(conn, inv["id"])
     if cur is None or cur["id"] != question_id:
         raise HTTPException(409, "this question is not open")
+    expected = _answer_format(inv, cur)
+    if expected != fmt:
+        raise HTTPException(422, f"this question takes {expected} answers")
     if cur["answered"]:
         raise HTTPException(409, "this question has already been answered")
     grace = get_settings().viva_answer_grace_seconds
@@ -417,8 +426,8 @@ def example(token: str, body: ExampleIn, x_viva_session: str | None = Header(def
 
 # ------------------------------------------------------------------ browser signals and submit
 
-BrowserKind = Literal["focus_lost", "focus_back", "paste_blocked", "fullscreen_exit", "mic_unavailable",
-                      "camera_unavailable"]
+BrowserKind = Literal["focus_lost", "focus_back", "paste_blocked", "copy_blocked", "fullscreen_exit",
+                      "fullscreen_back", "mic_unavailable", "camera_unavailable"]
 
 
 class EventIn(BaseModel):

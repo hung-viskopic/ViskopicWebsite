@@ -251,6 +251,7 @@ export type VivaInvitation = {
   flow: "standard" | "visq2";
   visq2_full: boolean;
   extension_seconds: number | null;
+  fullscreen_required: boolean;
   questions?: number;
   answered?: number;
 };
@@ -275,6 +276,8 @@ export type VivaSignals = {
   focus_lost: number;
   away_seconds: number;
   paste_blocked: number;
+  copy_blocked: number;
+  fullscreen_out_seconds: number;
   fullscreen_exit: number;
   late_write: number;
   timed_out: boolean;

@@ -69,6 +69,7 @@ export default function VivaReportPage() {
           <dt>Opened</dt><dd>{fmtDate(inv.opened_at)}</dd>
           <dt>Started</dt><dd>{fmtDate(inv.started_at)}</dd>
           <dt>Submitted</dt><dd>{fmtDate(inv.submitted_at)}</dd>
+          <dt>Full screen</dt><dd>{inv.fullscreen_required ? "Required (laptop or desktop only)" : "Not required"}</dd>
           <dt>Time per question</dt><dd>{inv.prep_seconds}s to think, {inv.answer_seconds}s to answer</dd>
           <dt>Questions</dt>
           <dd>{inv.question_engine ?? "Reviewer"}</dd>
@@ -243,7 +244,8 @@ function Signals({ s, seconds }: { s: VivaSignals; seconds: number | null }) {
   if (seconds !== null) items.push(`Answered ${seconds}s after the question appeared`);
   items.push(s.focus_lost ? `Left the page ${s.focus_lost} time(s), ${s.away_seconds}s in total` : "Stayed on the page");
   if (s.paste_blocked) items.push(`${s.paste_blocked} paste attempt(s) blocked`);
-  if (s.fullscreen_exit) items.push(`Left full screen ${s.fullscreen_exit} time(s)`);
+  if (s.copy_blocked) items.push(`${s.copy_blocked} copy attempt(s) blocked`);
+  if (s.fullscreen_exit) items.push(`Left full screen ${s.fullscreen_exit} time(s)${s.fullscreen_out_seconds ? `, ${s.fullscreen_out_seconds}s in total` : ""}`);
   if (s.camera_unavailable) items.push("No camera video for this answer (camera off or unavailable)");
   if (s.late_write) items.push(`${s.late_write} answer(s) arrived after the time limit and were refused`);
   return (

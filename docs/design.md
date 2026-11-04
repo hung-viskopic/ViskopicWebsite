@@ -188,7 +188,8 @@ released, with a server deadline. After each answer a `visq2_step` job feeds it 
 the next question", and after `VISKOPIC_VIVA_FOLLOWUP_WAIT_SECONDS` (90 s) the server applies the step offline with
 Visq's heuristics. Visq's state is stored encrypted and versioned in `viva_visq2_states`. The report shows every
 step with its answer and Visq's reviewer note, which compares the wording of the answers with the essay's structure
-(a reading aid, never a score). Answers are typed with paste blocked.
+(a reading aid, never a score). Answers are typed (paste blocked) or spoken, optionally with the webcam; spoken
+answers are transcribed before Visq reads them, and the extension is always typed.
 
 **The reviewer's own questions** (always available): from the template bank or written by the reviewer, approved
 before sending, spoken (optionally with webcam) or typed. The rest of this section applies to both flows.
@@ -197,6 +198,10 @@ Visq 1 (questions drafted from the essay's argument structure plus answer-driven
 is replaced by Visq 2; vivas sent with it keep their questions and follow-up decisions in the report. Visq runs
 through OpenRouter with zero data retention required on every call, or on OpenAI with `VISKOPIC_VISQ_PROVIDER=openai`
 (see decision 0009), and never writes to disk.
+
+**Full screen** is required by default ([`0009_viva_fullscreen_spoken_visq2.sql`](../app/backend/migrations/0009_viva_fullscreen_spoken_visq2.sql)):
+laptop and desktop browsers only; leaving it covers the question until the student returns (the clock keeps
+running) and is recorded with the time spent out. Copying the question text is blocked and recorded. See decision 0008.
 
 The student opens an emailed link (no staff login) and answers one question at a time. Rules enforced on the
 server: a question is released only after the previous one is answered or timed out (no reading ahead, no going

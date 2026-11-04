@@ -250,11 +250,21 @@ def run_transcribe(job: dict) -> None:
                      (job["id"],))
         record(conn, None, "viva.transcribed", "viva_recording", rec_id, {"provider": t.provider, "model": t.model},
                institution_id=iid, actor_label="worker")
+        _visq2_after_transcript(conn, iid, rec_id)
 
 
 def on_transcribe_failed(conn: Connection, job: dict, message: str) -> None:
     record(conn, None, "viva.transcription_failed", "viva_recording", job["viva_recording_id"], {"error": message},
            institution_id=job["institution_id"], actor_label="worker")
+    _visq2_after_transcript(conn, job["institution_id"], job["viva_recording_id"])   # go on with no text
+
+
+def _visq2_after_transcript(conn: Connection, iid: UUID, recording_id: UUID) -> None:
+    """A spoken answer in a Visq 2 viva: feed it into Visq once its transcript exists (or transcription failed)."""
+    row = conn.execute("SELECT r.question_id FROM viva_recordings r JOIN viva_invitations v ON v.id = r.invitation_id "
+                       "WHERE r.id = %s AND v.flow = 'visq2' AND v.status = 'in_progress'", (recording_id,)).fetchone()
+    if row:
+        queue_visq2_step(conn, iid, row["question_id"])
 
 
 # ------------------------------------------------------------------ Visq 2 (world-tree flow)
@@ -346,11 +356,17 @@ def on_visq2_prepare_failed(conn: Connection, job: dict, message: str) -> None:
 
 
 def answer_text(conn: Connection, dek: bytes, question_id: UUID) -> str:
+    """The typed answer, or the newest transcript of a spoken one ("" when there is none)."""
     resp = conn.execute("SELECT id, kind, answer_ciphertext FROM viva_responses WHERE question_id = %s",
                         (question_id,)).fetchone()
-    if resp is None or resp["kind"] != "typed" or resp["answer_ciphertext"] is None:
+    if resp is None or resp["kind"] == "skipped":
         return ""
-    return crypto.decrypt(dek, resp["answer_ciphertext"], f"viva_response:{resp['id']}").decode()
+    if resp["kind"] == "typed":
+        return crypto.decrypt(dek, resp["answer_ciphertext"], f"viva_response:{resp['id']}").decode()
+    t = conn.execute(
+        "SELECT t.id, t.text_ciphertext FROM viva_transcripts t JOIN viva_recordings r ON r.id = t.recording_id "
+        "WHERE r.question_id = %s ORDER BY t.created_at DESC LIMIT 1", (question_id,)).fetchone()
+    return crypto.decrypt(dek, t["text_ciphertext"], f"viva_transcript:{t['id']}").decode() if t else ""
 
 
 def queue_visq2_step(conn: Connection, institution_id: UUID, question_id: UUID) -> None:
