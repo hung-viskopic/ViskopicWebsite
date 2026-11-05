@@ -20,6 +20,7 @@ from .audit import record
 from .config import get_settings
 from .db import system_tx, tenant_tx
 from .deps import institution_dek
+from .analysis import interchangeability
 from .analysis import service as analysis
 from .analysis.service import JobError
 from .intake.extraction import ExtractionError, extract_sandboxed
@@ -34,16 +35,21 @@ UPDATE jobs SET status = 'running', attempts = attempts + 1,
        lease_until = now() + CASE kind WHEN 'build_profile' THEN interval '20 minutes'
                                        WHEN 'analyse_case' THEN interval '5 minutes'
                                        WHEN 'transcribe_viva_answer' THEN interval '5 minutes'
+                                       WHEN 'visq2_prepare' THEN interval '10 minutes'
+                                       WHEN 'visq2_preview' THEN interval '10 minutes'
+                                       WHEN 'visq2_step' THEN interval '5 minutes'
+                                       WHEN 'build_comparison_set' THEN interval '60 minutes'
                                        ELSE interval '2 minutes' END,
        updated_at = now()
 WHERE id = (
   SELECT id FROM jobs
   WHERE (status = 'queued' AND run_after <= now())
      OR (status = 'running' AND lease_until < now())
-  ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1
+  -- A student (or a reviewer waiting for a preview) may be waiting on these: take them first.
+  ORDER BY (kind IN ('transcribe_viva_answer','visq2_step','visq2_prepare','visq2_preview')) DESC, id FOR UPDATE SKIP LOCKED LIMIT 1
 )
 RETURNING id, institution_id, kind, document_id, profile_id, case_id, viva_invitation_id, viva_recording_id,
-          attempts, max_attempts
+          viva_question_id, comparison_set_id, visq2_preview_id, attempts, max_attempts
 """
 
 
@@ -71,6 +77,14 @@ def process_one() -> bool:
             viva.run_send_email(job)
         elif job["kind"] == "transcribe_viva_answer":
             viva.run_transcribe(job)
+        elif job["kind"] == "visq2_prepare":
+            viva.run_visq2_prepare(job)
+        elif job["kind"] == "visq2_step":
+            viva.run_visq2_step(job)
+        elif job["kind"] == "visq2_preview":
+            viva.run_visq2_preview(job)
+        elif job["kind"] == "build_comparison_set":
+            interchangeability.run_build_comparison_set(job)
         else:
             raise JobError(f"unknown job kind {job['kind']}", permanent=True)
     except (ExtractionError, JobError, VivaJobError) as e:
@@ -151,6 +165,18 @@ def _fail(job: dict, message: str) -> None:
             return
         if job["kind"] == "transcribe_viva_answer":
             viva.on_transcribe_failed(conn, job, message)
+            return
+        if job["kind"] == "visq2_prepare":
+            viva.on_visq2_prepare_failed(conn, job, message)
+            return
+        if job["kind"] == "visq2_step":
+            viva.on_visq2_step_failed(conn, job, message)
+            return
+        if job["kind"] == "visq2_preview":
+            viva.on_visq2_preview_failed(conn, job, message)
+            return
+        if job["kind"] == "build_comparison_set":
+            interchangeability.on_build_failed(conn, job, message)
             return
         if job["kind"] != "extract_document":
             analysis.on_job_failed(conn, job, message)

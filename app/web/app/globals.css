@@ -371,7 +371,76 @@ table.compact td, table.compact th { padding: 6px 8px; font-size: 13px; }
 }
 
 /* ---------- viva: staff side */
-.viva-form { border-top: 1px solid var(--mist); padding-top: 16px; display: grid; gap: 16px; }
+.viva-form { border-top: 1px solid var(--mist); padding-top: 16px; display: grid; gap: 14px; }
+.vf-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.vf-head h3 { margin: 0; font-size: 16px; }
+.vf-section { border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); margin: 0;
+  padding: 14px 16px 16px; display: grid; gap: 14px; min-width: 0; }
+.vf-section legend { padding: 0 6px; margin-left: -6px; font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.vf-step { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink);
+  color: var(--white); font-size: 12px; font-weight: 700; }
+.vf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 14px; align-items: start; }
+.vf-control { display: grid; gap: 4px; }
+.vf-control .label { margin: 0; }
+.vf-control .segmented { justify-self: start; min-width: min(100%, 240px); }
+.vf-control small { font-size: 12px; }
+.vf-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.vf-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 2px; }
+
+/* One control, several options (radio buttons styled as a segmented bar) */
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; background: var(--mist); padding: 2px; gap: 2px; max-width: 100%; }
+.segmented label { position: relative; flex: 1 1 auto; text-align: center; font-size: 14px; font-weight: 600; color: var(--ink-soft);
+  padding: 6px 12px; border-radius: 4px; cursor: pointer; white-space: nowrap; transition: background 150ms ease, color 150ms ease; }
+.segmented label:hover { color: var(--ink); }
+.segmented label.on { background: var(--white); color: var(--ink); box-shadow: 0 1px 2px rgba(16, 24, 39, 0.12); }
+.segmented label[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.segmented input { position: absolute; opacity: 0; inset: 0; margin: 0; pointer-events: none; }
+.segmented label:has(input:focus-visible) { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+/* Larger choice between two ways of working */
+.choice-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 10px; }
+.choice-cards label { position: relative; display: grid; gap: 2px; padding: 12px 14px 12px 40px; border: 1px solid var(--line);
+  border-radius: var(--radius); cursor: pointer; transition: border-color 150ms ease, background 150ms ease; }
+.choice-cards label:hover { border-color: #bcc5cf; }
+.choice-cards label.on { border-color: var(--blue); background: var(--blue-soft); box-shadow: inset 0 0 0 1px var(--blue); }
+.choice-cards input { position: absolute; left: 14px; top: 15px; width: 16px; height: 16px; margin: 0; accent-color: var(--blue); }
+.choice-cards strong { font-size: 14px; }
+.choice-cards span { font-size: 13px; color: var(--ink-soft); }
+
+/* On/off settings */
+.toggle-list { display: grid; gap: 10px; }
+.toggle-row { position: relative; display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; cursor: pointer; }
+.toggle-row input { position: absolute; opacity: 0; width: 36px; height: 20px; margin: 0; }
+.toggle-track { width: 36px; height: 20px; border-radius: 999px; background: #c3cad3; position: relative; margin-top: 1px; transition: background 150ms ease; }
+.toggle-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--white); box-shadow: 0 1px 2px rgba(16, 24, 39, 0.25); transition: transform 150ms var(--ease); }
+.toggle-row input:checked + .toggle-track { background: var(--blue); }
+.toggle-row input:checked + .toggle-track::after { transform: translateX(16px); }
+.toggle-row input:focus-visible + .toggle-track { outline: 2px solid var(--blue); outline-offset: 2px; }
+.toggle-row strong { display: block; font-size: 14px; }
+.toggle-row small { display: block; font-size: 12px; color: var(--ink-soft); }
+
+/* Visq 2 preview of the questions, before sending */
+.vq-preview { border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); padding: 14px 16px; display: grid; gap: 14px; }
+.vq-empty { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; border-style: dashed; }
+.vq-empty p { margin: 2px 0 0; }
+.vq-preview-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.vq-stage { border-top: 1px solid var(--line); padding-top: 12px; }
+.vq-stage h4 { margin: 0 0 8px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft);
+  display: flex; align-items: center; gap: 8px; }
+.vq-stage ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.vq-stage li { line-height: 1.5; }
+.vq-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-transform: none; padding: 1px 8px; border-radius: 999px;
+  background: #fdf3e1; color: var(--amber); }
+.vq-tag.exact { background: #e3f4ef; color: var(--green); }
+.vq-type { display: block; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.vq-whatif { margin: 0; padding: 10px 14px; border-left: 3px solid var(--amber); background: var(--white); border-radius: 0 6px 6px 0; }
+.vq-foot { margin: 0; }
+.spinner { display: inline-block; width: 12px; height: 12px; margin-right: 6px; border-radius: 50%; border: 2px solid var(--line);
+  border-top-color: var(--blue); vertical-align: -1px; animation: vq-spin 0.8s linear infinite; }
+@keyframes vq-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } .toggle-track::after { transition: none; } }
+@media (max-width: 480px) { .segmented, .vf-control .segmented { display: flex; justify-self: stretch; } .vf-section { padding: 12px; } }
 .viva-questions h3 { margin: 0; }
 .viva-question-list { margin: 0; padding-left: 20px; display: grid; gap: 16px; }
 .viva-question-list li { display: grid; gap: 8px; }
@@ -416,3 +485,30 @@ ul.chips { list-style: none; padding: 0; margin-left: 0; }
 .viva-selfview { width: 160px; height: 120px; object-fit: cover; border-radius: var(--radius); background: var(--navy); transform: scaleX(-1); flex: none; }
 .viva-video { width: 100%; max-width: 480px; border-radius: var(--radius); background: var(--navy); }
 @media (max-width: 520px) { .viva-selfview { width: 112px; height: 84px; } }
+
+/* Combined Δ + Pipeline 2 summary on the evidence report */
+.combined { border: 1px solid var(--line); border-left-width: 4px; border-radius: var(--radius); padding: 12px 16px; margin: 0 0 12px; }
+.combined-review_recommended { border-left-color: var(--amber); background: #fdf8ee; }
+.combined-no_flag { border-left-color: var(--green); }
+.combined-insufficient_evidence { border-left-color: var(--line); background: var(--mist); }
+.combined-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.combined-head h3 { margin: 0 0 6px; font-size: 16px; }
+.combined-parts { margin: 0 0 8px; padding-left: 18px; font-size: 14px; }
+.combined-notes { margin: 0 0 8px; padding-left: 18px; }
+
+/* Visq: reviewer-only note on what a good answer covers */
+.viva-reviewer-note { margin: 4px 0 8px; padding: 8px 12px; background: var(--mist); border-radius: var(--radius); }
+.comparison-set { margin: 4px 0 0; }
+
+/* Visq 2 on the student page */
+.viva-stage-note { margin: 0 0 10px; padding: 8px 12px; background: var(--blue-soft); border-radius: var(--radius); font-size: 14px; }
+.viva-example { margin: 0 0 12px; }
+.viva-example-body { margin-top: 6px; padding: 8px 12px; border: 1px dashed var(--line); border-radius: var(--radius); }
+.viva-example-body p { margin: 0 0 4px; }
+.viva-visq2-steps { margin: 4px 0 10px; padding-left: 20px; }
+.viva-note { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+
+/* Viva: the question can't be selected or copied (the answer box can); the full-screen panel */
+.viva-question { user-select: none; -webkit-user-select: none; }
+.viva-question textarea { user-select: text; -webkit-user-select: text; }
+.viva-fullscreen { text-align: center; }

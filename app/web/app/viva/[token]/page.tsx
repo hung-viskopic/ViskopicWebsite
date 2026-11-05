@@ -21,26 +21,48 @@ type Intro = {
   is_test: boolean;
   transcribed: boolean;
   camera_required: boolean;
+  /** Full screen required: laptop/desktop browsers only; leaving it covers the question until the student returns. */
+  fullscreen_required: boolean;
+  /** "visq2": Visq writes the questions during the viva (clarifying questions, an extension, a short viva). */
+  flow: "standard" | "visq2";
+  extension_seconds: number | null;
+  visq2_texts: { warning: string; ext_note: string; viva_start: string } | null;
 };
+
+type Stage = "clarify" | "extension" | "viva";
 
 type Question = {
   done: false;
-  question: { id: string; position: number; total: number; text: string; passage: string | null };
+  question: {
+    id: string; position: number; total: number; followup: boolean; text: string; passage: string | null;
+    /** Visq 2 only: which step this is, and its number within the step. */
+    stage: Stage | null; stage_number: number | null; stage_total: number | null;
+  };
   answer_format: "spoken" | "typed";
   prep_seconds: number;
   answer_seconds: number;
   released_at: string;
   due_at: string;
   server_now: string;
+  /** Visq 2's extension: the most words the box takes. */
+  max_words: number | null;
 };
 
-type Next = Question | { done: true; total: number };
+// "waiting": the server is still deciding whether to ask a follow-up; ask again shortly.
+type Next = Question | { done: true; total: number } | { done: false; waiting: true; retry_after_ms: number; total: number };
 type BrowserEvent = { kind: string; question_id?: string; detail?: Record<string, number | boolean> };
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+/** Full screen works here and this looks like a laptop or desktop (a precise pointer, not only a touchscreen). */
+function fullscreenCapable(): boolean {
+  if (typeof document === "undefined") return true;
+  const touchOnly = window.matchMedia?.("(pointer: coarse)").matches && !window.matchMedia?.("(any-pointer: fine)").matches;
+  return !!document.fullscreenEnabled && !touchOnly;
 }
 
 function store(key: string, value?: string | null) {
@@ -78,7 +100,7 @@ function clock(s: number) {
 export default function VivaPage() {
   const { token } = useParams<{ token: string }>();
   const [intro, setIntro] = useState<Intro | null>(null);
-  const [stage, setStage] = useState<"loading" | "intro" | "question" | "finished" | "submitted" | "closed" | "taken">("loading");
+  const [stage, setStage] = useState<"loading" | "intro" | "question" | "waiting" | "finished" | "submitted" | "closed" | "taken">("loading");
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState<Question | null>(null);
   const [total, setTotal] = useState(0);
@@ -88,6 +110,8 @@ export default function VivaPage() {
   const events = useRef<BrowserEvent[]>([]);
   const currentQ = useRef<string | undefined>(undefined);
   const skew = useRef(0); // server clock minus browser clock, ms
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fsExitAt = useRef<number | null>(null);
 
   const call = useCallback(async <T,>(method: string, path: string, body?: BodyInit, contentType?: string): Promise<T> => {
     const headers: Record<string, string> = {};
@@ -133,7 +157,32 @@ export default function VivaPage() {
     const onVis = () => track(document.hidden ? "focus_lost" : "focus_back");
     const onBlur = () => !document.hidden && track("focus_lost");
     const onFocus = () => track("focus_back");
-    const onFs = () => !document.fullscreenElement && track("fullscreen_exit");
+    const onFs = () => {
+      const on = !!document.fullscreenElement;
+      setIsFullscreen(on);
+      if (!on) {
+        fsExitAt.current = Date.now();
+        track("fullscreen_exit");
+      } else if (fsExitAt.current !== null) {
+        track("fullscreen_back", { seconds: Math.round((Date.now() - fsExitAt.current) / 100) / 10 });
+        fsExitAt.current = null;
+      }
+    };
+    // Copying the question (or anything outside the answer box) is blocked and recorded, like pasting.
+    const onCopy = (e: ClipboardEvent) => {
+      if (document.activeElement instanceof HTMLTextAreaElement) return;   // copying within their own answer is fine
+      e.preventDefault();
+      track("copy_blocked", { chars: (window.getSelection()?.toString() ?? "").length });
+    };
+    // Dragging text out of the page (into another window) is another way to copy it.
+    const onDrag = (e: DragEvent) => {
+      if (e.target instanceof HTMLTextAreaElement) return;
+      e.preventDefault();
+      track("copy_blocked", { chars: (window.getSelection()?.toString() ?? "").length, drag: true });
+    };
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCopy);
+    document.addEventListener("dragstart", onDrag);
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
@@ -144,6 +193,9 @@ export default function VivaPage() {
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCopy);
+      document.removeEventListener("dragstart", onDrag);
       clearInterval(t);
     };
   }, [stage, track, flush]);
@@ -158,6 +210,12 @@ export default function VivaPage() {
         setStage("finished");
         return;
       }
+      if ("waiting" in n) {
+        currentQ.current = undefined;
+        setStage("waiting");
+        setTimeout(() => { loadNextRef.current?.(); }, n.retry_after_ms);
+        return;
+      }
       skew.current = new Date(n.server_now).getTime() - Date.now();
       currentQ.current = n.question.id;
       setTotal(n.question.total);
@@ -170,6 +228,8 @@ export default function VivaPage() {
       else setError(err.message);
     }
   }, [call, flush]);
+  const loadNextRef = useRef<(() => void) | null>(null);
+  useEffect(() => { loadNextRef.current = loadNext; }, [loadNext]);
 
   async function begin() {
     setError(null);
@@ -198,7 +258,10 @@ export default function VivaPage() {
         session.current = r.session;
         store(`viva:${token}`, r.session);
       }
-      document.documentElement.requestFullscreen?.().catch(() => {});
+      // Best effort here: after a microphone prompt the browser may refuse; the "return to full screen" panel
+      // then asks for one more click.
+      await document.documentElement.requestFullscreen?.().catch(() => {});
+      setIsFullscreen(!!document.fullscreenElement);
       await loadNext();
     } catch (e) {
       const err = e as HttpError;
@@ -254,16 +317,40 @@ export default function VivaPage() {
           </div>
         )}
         {stage === "intro" && intro && <IntroCard intro={intro} resuming={!!session.current} error={error} onBegin={begin} />}
+        {stage === "question" && q && intro?.fullscreen_required && !isFullscreen && (
+          <div className="card narrow viva-fullscreen" role="alertdialog" aria-labelledby="viva-fs-title">
+            <h1 id="viva-fs-title">Return to full screen</h1>
+            <p>This conversation needs to fill your screen. The question is hidden until you return; your answer so far is kept.</p>
+            <p className="muted small">The clock keeps running. Leaving full screen is recorded for the people reviewing your work.</p>
+            <button className="btn" autoFocus
+              onClick={() => document.documentElement.requestFullscreen?.().catch(() => setError("Your browser did not allow full screen. Try again, or press F11."))}>
+              Return to full screen
+            </button>
+            {error && <p className="error" role="alert">{error}</p>}
+          </div>
+        )}
         {stage === "question" && q && (
+          <div hidden={!!intro?.fullscreen_required && !isFullscreen}>
           <QuestionCard key={`${q.question.id}-${loads}`} q={q} skew={skew.current} stream={stream.current}
-            camera={!!intro?.camera_required} call={call}
+            camera={!!intro?.camera_required} call={call} texts={intro?.visq2_texts ?? null}
             onPasteBlocked={(chars) => track("paste_blocked", { chars })} onSaved={loadNext} onError={setError} />
+          </div>
         )}
         {stage === "question" && error && <p className="error" role="alert">{error}</p>}
+        {stage === "waiting" && (
+          <div className="card narrow" role="status" aria-live="polite">
+            <h1>One moment</h1>
+            <p>Your answer is saved. Preparing the next question…</p>
+            {error && <p className="error" role="alert">{error}</p>}
+          </div>
+        )}
         {stage === "finished" && (
           <div className="card narrow">
             <h1>All questions done</h1>
-            <p>You have reached the end of the {total} questions. Submit to finish. You can&apos;t change answers after this.</p>
+            <p>
+              {intro?.flow === "visq2" ? "You have answered every question." : `You have reached the end of the ${total} questions.`}
+              {" "}Submit to finish. You can&apos;t change answers after this.
+            </p>
             {error && <p className="error" role="alert">{error}</p>}
             <button className="btn" onClick={submit}>Submit answers</button>
           </div>
@@ -275,6 +362,19 @@ export default function VivaPage() {
 
 function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming: boolean; error: string | null; onBegin: () => void }) {
   const [agreed, setAgreed] = useState(resuming);
+  const [capable] = useState(fullscreenCapable);
+  if (intro.fullscreen_required && !capable) {
+    return (
+      <div className="card narrow viva-intro">
+        <h1>Please use a laptop or desktop computer</h1>
+        <p>
+          This follow-up conversation runs in full screen, which this device or browser doesn&apos;t support. Open the
+          same link on a laptop or desktop computer, in an up-to-date Chrome, Edge, Firefox or Safari.
+        </p>
+        <p className="muted small">If you can&apos;t use one, or full screen doesn&apos;t work with tools you rely on, contact your module team.</p>
+      </div>
+    );
+  }
   const [busy, setBusy] = useState(false);
   const spoken = intro.answer_format === "spoken";
   const perQ = intro.prep_seconds + intro.answer_seconds;
@@ -282,13 +382,27 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
     <div className="card narrow viva-intro">
       <h1>A short follow-up about your coursework</h1>
       <p>
-        {intro.institution_name} has asked you to answer {intro.question_count} questions about a recent piece of your
-        coursework. It takes about {Math.max(5, Math.ceil((intro.question_count * perQ) / 60))} minutes. Please complete it by{" "}
+        {intro.flow === "visq2"
+          ? <>{intro.institution_name} has asked you to take a short extension to a recent piece of your coursework. It takes about{" "}
+              {Math.max(10, Math.ceil(((intro.question_count + 3) * perQ + (intro.extension_seconds ?? 360)) / 60))} minutes.</>
+          : <>{intro.institution_name} has asked you to answer {intro.question_count} questions about a recent piece of your
+              coursework. It takes about {Math.max(5, Math.ceil((intro.question_count * perQ) / 60))} minutes.</>}
+        {" "}Please complete it by{" "}
         {new Date(intro.deadline_at).toLocaleString("en-GB", { dateStyle: "long", timeStyle: "short" })}.
       </p>
       <h2>How it works</h2>
       <ul>
         <li>Questions appear one at a time. You can&apos;t go back to an earlier question or see the next one early.</li>
+        {intro.flow === "visq2" && (
+          <>
+            <li>
+              It has three parts: perhaps a few short questions about things your work takes for granted, then a short
+              piece of writing about a changed situation ({duration(intro.extension_seconds ?? 360)}), then{" "}
+              {intro.question_count} short questions. Some answers may get one short follow-up.
+            </li>
+            <li>Each question has a &quot;Show an example&quot; button with a worked example on a different topic.</li>
+          </>
+        )}
         <li>
           Each question gives you {intro.prep_seconds > 0 ? `${duration(intro.prep_seconds)} to think, then ` : ""}
           {duration(intro.answer_seconds)} to {spoken ? "answer out loud" : "type your answer"}. The time is kept by
@@ -313,6 +427,7 @@ function IntroCard({ intro, resuming, error, onBegin }: { intro: Intro; resuming
         tried to paste, or opened the link on a second device. Staff on your module see this information; it is
         stored encrypted and deleted after the review. These details are only hints for the people reviewing your
         work; none of them decides anything on its own.
+        {intro.flow === "visq2" && " An automated system reads your work and your answers only to choose the next question. It does not mark your answers."}
       </p>
       {!resuming && (
         <label className="viva-consent">
@@ -336,8 +451,23 @@ function SelfView({ stream }: { stream: MediaStream }) {
   );
 }
 
-function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, onError }: {
+function stageLabel(q: Question["question"]): string {
+  if (!q.stage) return q.followup ? `Follow-up to question ${q.position}` : `Question ${q.position} of ${q.total}`;
+  if (q.stage === "extension") return "Extension";
+  const name = q.stage === "clarify" ? "Clarifying question" : "Question";
+  if (q.followup) return `${name} ${q.stage_number ?? ""}: follow-up`;
+  return q.stage_total ? `${name} ${q.stage_number} of ${q.stage_total}` : `${name} ${q.stage_number ?? ""}`;
+}
+
+function words(t: string) {
+  return t.trim() ? t.trim().split(/\s+/).length : 0;
+}
+
+type Example = { topic: string; question: string; answer: string; reminder: string };
+
+function QuestionCard({ q, skew, stream, camera, call, texts, onPasteBlocked, onSaved, onError }: {
   q: Question;
+  texts: Intro["visq2_texts"];
   skew: number;
   stream: MediaStream | null;
   camera: boolean;
@@ -354,7 +484,19 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
   const [skipPrep, setSkipPrep] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [example, setExample] = useState<Example | null>(null);
+  const [exampleN, setExampleN] = useState(0);
   const recorder = useRef<MediaRecorder | null>(null);
+  const stage = q.question.stage;
+  const maxWords = q.max_words ?? null;
+  const overWords = maxWords !== null && words(text) > maxWords;
+
+  async function showExample() {
+    try {
+      setExample(await call<Example>("POST", "/example", JSON.stringify({ n: exampleN }), "application/json"));
+      setExampleN((n) => n + 1);
+    } catch (e) { onError((e as Error).message); }
+  }
   const chunks = useRef<Blob[]>([]);
   const finished = useRef(false);
 
@@ -430,7 +572,7 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
   return (
     <article className="card viva-question" aria-labelledby="viva-q">
       <div className="viva-question-head">
-        <p className="viva-progress">Question {q.question.position} of {q.question.total}</p>
+        <p className="viva-progress">{stageLabel(q.question)}</p>
         {camera && stream && stream.getVideoTracks().length > 0 && <SelfView stream={stream} />}
       </div>
       {q.question.passage && (
@@ -439,7 +581,28 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
           <p>{q.question.passage}</p>
         </blockquote>
       )}
+      {texts && (stage === "clarify" || stage === "extension") && (
+        <p className="viva-stage-note">{texts.warning} {texts.ext_note}</p>
+      )}
+      {texts && stage === "viva" && q.question.stage_number === 1 && !q.question.followup && (
+        <p className="viva-stage-note">{texts.viva_start}</p>
+      )}
       <h1 id="viva-q" className="viva-q-text">{q.question.text}</h1>
+      {stage && (
+        <div className="viva-example">
+          <button type="button" className="link" onClick={showExample}>
+            {example ? "Show another example" : "Show an example"}
+          </button>
+          {example && (
+            <div className="viva-example-body" role="note">
+              <p className="small"><strong>Example on another topic ({example.topic})</strong></p>
+              <p className="small"><em>Question:</em> {example.question}</p>
+              <p className="small"><em>Answer:</em> {example.answer}</p>
+              <p className="muted small">{example.reminder}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {!answering && (
         <div className="viva-phase">
@@ -461,14 +624,16 @@ function QuestionCard({ q, skew, stream, camera, call, onPasteBlocked, onSaved, 
         <div className="viva-phase">
           <label className="field">
             <span>Your answer</span>
-            <textarea rows={8} value={text} maxLength={5000} autoFocus disabled={saving}
+            <textarea rows={stage === "extension" ? 14 : 8} value={text} maxLength={5000} autoFocus disabled={saving}
               onChange={(e) => setText(e.target.value)}
               onPaste={(e) => { e.preventDefault(); onPasteBlocked(e.clipboardData.getData("text").length); }}
               onDrop={(e) => e.preventDefault()} />
-            <small>{text.length} of 5,000 characters. Pasting is switched off.</small>
+            <small className={overWords ? "error" : undefined}>
+              {maxWords !== null ? `${words(text)} of ${maxWords} words.` : `${text.length} of 5,000 characters.`} Pasting is switched off.
+            </small>
           </label>
           <p className="viva-clock" aria-live="off">Time left: {clock(left)}</p>
-          <button className="btn" disabled={saving || !text.trim()} onClick={finishNow}>{saving ? "Saving…" : "Save and continue"}</button>
+          <button className="btn" disabled={saving || !text.trim() || overWords} onClick={finishNow}>{saving ? "Saving…" : "Save and continue"}</button>
         </div>
       )}
     </article>

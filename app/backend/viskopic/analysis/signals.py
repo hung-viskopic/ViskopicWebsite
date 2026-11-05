@@ -47,25 +47,12 @@ class DocumentSignalsPipeline:
                               evidence=items, details={"hidden_text_chars": s.get("hidden_text_chars", 0)})
 
 
-class NotIntegratedPipeline:
-    """Placeholder for a pipeline that isn't available yet, so the report says so explicitly."""
-
-    def __init__(self, name: str, category: str, reason: str):
-        self.name, self.category, self.reason = name, category, reason
-        self.version = f"{name}-not-integrated"
-
-    def run(self, ctx: AnalysisContext) -> PipelineResult:
-        return PipelineResult(status="unavailable", reason=self.reason)
-
-
 def registered_pipelines():
     from .consistency import ConsistencyPipeline
+    from .interchangeability import InterchangeabilityPipeline
 
     return [
         DocumentSignalsPipeline(),
         ConsistencyPipeline(),
-        NotIntegratedPipeline("language", "regeneration",
-                              "The language (β, regeneration) pipeline has not been built yet."),
-        NotIntegratedPipeline("authenticity", "semantic",
-                              "The authenticity (α, semantic) model is still research code with no runnable scorer."),
+        InterchangeabilityPipeline(),     # Pipeline 2 from the model team ("AI comparison")
     ]

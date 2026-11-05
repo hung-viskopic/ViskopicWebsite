@@ -166,8 +166,14 @@ def test_enrolled_profile_and_evidence_report(client, tenant_factory):
             assert abs(item["z_score"]) >= 2 and item["baseline_sd"] is not None
 
     assert run(rep, "document_signals")["status"] == "completed"
-    assert run(rep, "language")["status"] == "unavailable"
-    assert run(rep, "authenticity")["status"] == "unavailable"
+    p2 = run(rep, "interchangeability")      # Pipeline 2 took the β slot; no assignment, so nothing to compare with
+    assert p2["status"] == "not_eligible" and "assignment" in p2["reason"]
+    assert not any(r["pipeline"] in ("language", "combined") for r in rep["runs"])
+    assert rep["combined"]["status"] in ("review_recommended", "no_flag")
+    assert rep["combined"]["pipelines_run"] == 1 and rep["combined"]["pipeline2_interchangeability"]["status"] == "unavailable"
+    assert any("The AI comparison did not run" in n for n in rep["combined"]["coverage_notes"])
+    assert {r["pipeline"] for r in rep["runs"]} == {"consistency", "interchangeability", "document_signals"}
+    assert [r["label"] for r in rep["runs"]] == ["Writing style", "AI comparison", "Document signals"]
 
     # Viewers can read the report; another institution can't see it at all.
     assert report(client, viewer, doc_id)["case"]["id"] == rep["case"]["id"]
@@ -238,7 +244,7 @@ def test_awaiting_baseline_then_demonstration_profile(client, tenant_factory, un
     assert delta["details"]["website_status"] == "scored_demo_unreviewed"
     assert "demonstration reference profile" in delta["evidence"][0]["statement"]
     assert "unreviewed demonstration result" in delta["evidence"][0]["statement"]
-    assert rep["total_runs"] == 8   # first attempt kept alongside the new one
+    assert rep["total_runs"] == 6   # first attempt kept alongside the new one (3 checks each)
 
     # A short submission is explained, not scored.
     short = upload(client, reviewer, course, student, "short.txt", essay(6, words=400).encode(), role="submission")
@@ -252,7 +258,7 @@ def test_awaiting_baseline_then_demonstration_profile(client, tenant_factory, un
     assert client.post(f"/api/cases/{case_id}/reanalyse", headers=viewer).status_code == 403
     assert client.post(f"/api/cases/{case_id}/reanalyse", headers=reviewer).status_code == 202
     drain()
-    assert report(client, reviewer, doc_id)["total_runs"] == 12
+    assert report(client, reviewer, doc_id)["total_runs"] == 9
 
     # Outside local development the research papers behind a demonstration profile can't be quality
     # reviewed, so the same case is no longer scored. It is not "awaiting review" either: no review

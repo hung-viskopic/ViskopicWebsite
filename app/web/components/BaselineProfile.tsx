@@ -35,7 +35,7 @@ export function BaselineProfile({ studentId, canManage }: { studentId: string; c
 
   return (
     <section className="card">
-      <h2>Consistency profile</h2>
+      <h2>Writing-style profile</h2>
       <p className="muted small">
         Needs {c.min_documents} baseline documents of at least {c.min_words.toLocaleString()} words each. Built and
         updated automatically.

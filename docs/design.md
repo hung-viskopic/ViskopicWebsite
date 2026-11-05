@@ -6,6 +6,11 @@ for the first milestone (foundations and intake) lives in [`app/`](../app/).
 
 Status key: ✅ built · 🔜 next milestones
 
+Reports use plain names: **Writing style** (Pipeline 1, Δ, the V1.3 consistency model) and **AI comparison**
+(Pipeline 2, interchangeability), plus **Document signals**. The α (authenticity) and β (language) placeholders
+were dropped: the team no longer plans them. Old placeholder runs stay in the database (append-only) but are hidden.
+Vivas are sent by a reviewer; a flag never sends one automatically.
+
 ## 1. Principles
 
 1. **Evidence, not bare scores.** Every result explains *why* (checkable observations), *where* (highlighted
@@ -29,7 +34,7 @@ flowchart TD
     C -- yes --> QR{Texts quality-reviewed? ✅}
     QR -- no --> RV[Awaiting review ✅]
     RV -- reviews recorded --> D
-    QR -- yes --> D[Analysis: plug-in pipelines ✅ Δ · 🔜 α β]
+    QR -- yes --> D[Analysis: writing style ✅ · AI comparison ✅]
     D --> E[Evidence report ✅]
     E -- no concern --> X[Closed]
     E -- concern --> F[Viva: style or reasoning ✅ MVP]
@@ -70,10 +75,16 @@ into our extracted text (the Δ model samples from its own normalised copy, so p
 
 | Pipeline | Status | Evidence it produces |
 |---|---|---|
-| Δ Consistency (style) | ✅ real model: frozen V1.3 from `VISKOPIC_PROJECT` (`model/v1-3-mvp-handoff`, commit `d102392`), vendored unchanged in `app/backend/vendor/consistency_v13`, called through the model team's website adapter (`viskopic.website-consistency.v1`) | every scored result labelled **experimental**; overall centred score vs frozen threshold with the margin (not a probability or percentage, can be negative, tiny values shown as "near zero"); raw distance and distance ÷ typical baseline distance, shown separately as descriptive diagnostics; the 3 feature groups that differ most; up to 8 features ≥2 spreads from the student's mean in the same direction in ≥2 of the 3 sampled passages, each with observed value, baseline mean and spread, and the passages to highlight |
+| **Writing style** — Pipeline 1, Δ consistency | ✅ real model: frozen V1.3 from `VISKOPIC_PROJECT` (`model/v1-3-mvp-handoff`, commit `d102392`), vendored unchanged in `app/backend/vendor/consistency_v13`, called through the model team's website adapter (`viskopic.website-consistency.v1`) | every scored result labelled **experimental**; overall centred score vs frozen threshold with the margin (not a probability or percentage, can be negative, tiny values shown as "near zero"); raw distance and distance ÷ typical baseline distance, shown separately as descriptive diagnostics; the 3 feature groups that differ most; up to 8 features ≥2 spreads from the student's mean in the same direction in ≥2 of the 3 sampled passages, each with observed value, baseline mean and spread, and the passages to highlight |
 | Document signals | ✅ | hidden text (white, ≤2pt, hidden formatting, invisible PDF layers); recorded editing time under 1 minute per 100 words. Author names are never copied into statements |
-| β Language (regeneration) | 🔜 not built | run recorded as *unavailable* |
-| α Authenticity (semantic) | 🔜 research code only | run recorded as *unavailable* |
+| **AI comparison** — Pipeline 2, interchangeability | ✅ frozen release `p2-interchangeability-v1.1` from `VISKOPIC_PROJECT` (`model/v1-3-mvp-handoff`, commit `9cfe33d`), vendored unchanged in `app/backend/vendor/interchangeability_p2` | labelled **experimental**; score = how much more the opening third (equal word thirds) of the essay's first 250 words shares rare words with its own continuation than AI essays' openings on the same assignment do (below 0 = "interchangeable"; threshold validated on school essays, where it flags about 1 in 10 human essays, and experimental for university essays — an evidence item and a combined-report note say so); the opening highlighted; a note when only GPT comparison essays were used. Needs no baseline. Comparison essays are generated once per assignment from the assignment prompt only (`build_comparison_set` job, `VISKOPIC_P2_GENERATE_COMPARISONS`; GPT with the OpenAI key, plus Qwen and Gemma when `VISKOPIC_P2_OLLAMA_URL` points at an Ollama GPU server, which is the evaluated three-family set); essays under 150 words are recorded as *not eligible* (v1, which needed 9 sentences in 250 words, rejected 44% of university essays) |
+
+**Combined report** (the model team's "either flags" rule, re-implemented over finished runs in
+`analysis/combined.py`, stored as a `combined` run): *review recommended* when Δ or Pipeline 2 flags, *no flag*
+when what ran raised nothing, *not enough information* when neither ran. Scores are never averaged. It shows each
+pipeline's explanation, coverage notes (which kinds of AI essay are left uncovered) and the model team's
+interpretation warning. Demonstration profiles never count as the student's style. We don't call their
+`CombinedScorer`: it calls V1.3 directly and would skip the website adapter and quality reviews.
 
 **States without a verdict.** The adapter returns `insufficient_evidence` (too few baseline documents or usable
 words), `quality_review_required`, `unsupported_text` or `cannot_score` instead of a score. These are stored as
@@ -147,14 +158,55 @@ storage), `viva_transcripts` (encrypted text plus a numbers-only speech timeline
 `viva_assessments`. All append-only except invitations and recordings. Jobs gained `send_viva_email` and
 `transcribe_viva_answer`. `viva_resolve_token` is the only way to turn a student's token into a tenant.
 
+Milestone 6c added ([`0007_visq_and_p2.sql`](../app/backend/migrations/0007_visq_and_p2.sql)): follow-up questions
+(`viva_questions.parent_id`, source `visq_followup`), Visq question types and an encrypted reviewer note per question,
+`viva_followup_decisions` (append-only, one per main question: follow-up or move on, why, and which engine), and
+`assignment_comparison_sets` (Pipeline 2's AI essays per assignment, AI text only). Jobs gained `viva_followup` and
+`build_comparison_set`; the worker takes viva jobs first because a student may be waiting.
+
+Visq 2 added ([`0008_visq2.sql`](../app/backend/migrations/0008_visq2.sql)): `viva_invitations.flow`
+(`standard` / `visq2`), the full-set switch and extension time; `viva_visq2_states` (Visq's state per invitation,
+encrypted, versioned); question source `visq2`; jobs `visq2_prepare` and `visq2_step`. The Visq 1 follow-up
+columns and table from 0007 are kept for old vivas but no longer written. Previews
+([`0010_visq2_previews.sql`](../app/backend/migrations/0010_visq2_previews.sql)): `viva_visq2_previews` (per case,
+the prepared state and the reviewer's draft, both encrypted) and job `visq2_preview`.
+
 Next milestones add: `segments` (with pgvector embeddings), `evaluator_configs`, `evaluations`, `decisions`,
 `appeals`, and the later supervision modes (live, invigilated room, third-party proctor).
 
 ### Viva MVP (6a/6b)
 
-A reviewer sends a viva from a submission. Questions come from the template bank or, with external AI switched on
-(local testing with synthetic essays only), are drafted from the submission, each tied to a passage that must be
-found verbatim in the essay. The reviewer edits and approves every question.
+A reviewer sends a viva from a submission, in one of two flows.
+
+**Visq 2** (default when external AI is on; local testing with synthetic essays only). The model team's viva engine
+(vendored unchanged in `app/backend/vendor/visq_v2`, commit `3d631d8`) runs its world-tree flow
+([`0008_visq2.sql`](../app/backend/migrations/0008_visq2.sql)). A worker job reads the essay as a tree of points and
+what it takes for granted. During the viva Visq asks clarifying questions only where the essay is silent, then a
+timed, typed **extension** (a what-if from outside the essay: what would you keep, drop or add), then a short viva
+(3 questions, or 7 with the full set) sampled from fixed types, some with one follow-up, each with a worked example
+on another topic on request. Before sending, the reviewer presses **Prepare questions**: a `visq2_preview` job runs
+Visq's prepare step and shows the exact clarifying questions plus a draft what-if and draft viva questions (worked
+out as if the student gave no clarifying answers). Sending hands that prepared state to the invitation, so the
+clarifying questions are the ones shown; the what-if and viva questions depend on the student's answers and may differ
+(decision 0009). Changing the set size or what-if time means preparing again. Each question is frozen in `viva_questions` (source `visq2`, its step in `qtype`) when
+released, with a server deadline. After each answer a `visq2_step` job feeds it into Visq; the page shows "Preparing
+the next question", and after `VISKOPIC_VIVA_FOLLOWUP_WAIT_SECONDS` (90 s) the server applies the step offline with
+Visq's heuristics. Visq's state is stored encrypted and versioned in `viva_visq2_states`. The report shows every
+step with its answer and Visq's reviewer note, which compares the wording of the answers with the essay's structure
+(a reading aid, never a score). Answers are typed (paste blocked) or spoken, optionally with the webcam; spoken
+answers are transcribed before Visq reads them, and the extension is always typed.
+
+**The reviewer's own questions** (always available): from the template bank or written by the reviewer, approved
+before sending, spoken (optionally with webcam) or typed. The rest of this section applies to both flows.
+
+Visq 1 (questions drafted from the essay's argument structure plus answer-driven follow-ups) was briefly used and
+is replaced by Visq 2; vivas sent with it keep their questions and follow-up decisions in the report. Visq runs
+through OpenRouter with zero data retention required on every call, or on OpenAI with `VISKOPIC_VISQ_PROVIDER=openai`
+(see decision 0009), and never writes to disk.
+
+**Full screen** is required by default ([`0009_viva_fullscreen_spoken_visq2.sql`](../app/backend/migrations/0009_viva_fullscreen_spoken_visq2.sql)):
+laptop and desktop browsers only; leaving it covers the question until the student returns (the clock keeps
+running) and is recorded with the time spent out. Copying the question text is blocked and recorded. See decision 0008.
 
 The student opens an emailed link (no staff login) and answers one question at a time. Rules enforced on the
 server: a question is released only after the previous one is answered or timed out (no reading ahead, no going
@@ -232,9 +284,10 @@ option to deploy into the university's own cloud account.
 3. ✅ Intake: upload, validation, encrypted storage, queue, sandboxed extraction, retries, document signals
 4. ✅ Cases and baselines: case creation on submission, versioned encrypted baseline profiles, eligibility
 5. ✅ Pipeline contract, document-signal pipeline, **real Δ (V1.3)** through the model team's website contract with
-   quality reviews, α/β placeholders, evidence report UI
-6. 🟡 Viva MVP ✅ (invitations, AI-drafted questions anchored to the essay, timed spoken/typed answers enforced by
-   the server, transcripts, speech timeline, signals, report and ratings). 🔜 Evaluator with versioned θ, live and
+   quality reviews, α/β placeholders, evidence report UI; **Pipeline 2 (interchangeability)** in the β slot with
+   per-assignment AI comparison essays, and the combined either-flags report
+6. 🟡 Viva MVP ✅ (invitations, Visq 2 world-tree vivas or the reviewer's own questions, timed
+   spoken/typed answers enforced by the server, transcripts, speech timeline, signals, report and ratings). 🔜 Evaluator with versioned θ, live and
    invigilated supervision, decisions, appeals
-7. 🔜 Real α (semantic) and β (regeneration) pipelines; a validated Δ student configuration (fewer, shorter
+7. 🔜 An Ollama GPU host for the AI comparison's Qwen and Gemma families (the setting exists); a validated Δ student configuration (fewer, shorter
    baseline essays) from the model team

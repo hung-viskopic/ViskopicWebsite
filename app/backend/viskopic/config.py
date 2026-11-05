@@ -74,8 +74,28 @@ class Settings(BaseSettings):
     allow_external_ai: bool = False
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_question_model: str = "gpt-4o-mini"
     openai_transcribe_model: str = "whisper-1"   # returns segment timestamps for the speech timeline
+
+    # Visq 2 (vendor/visq_v2): the world-tree viva. It reads the submission, then writes clarifying questions,
+    # a what-if extension and a short viva during the session. It sends the essay and the answers to the model
+    # provider. Same rule as above: needs allow_external_ai, synthetic essays only.
+    # "openrouter" (default): the model Visq was tuned on, with zero data retention enforced on every call.
+    # "openai": the same prompts on OpenAI with VISKOPIC_OPENAI_API_KEY (store=false, but no zero-retention
+    # guarantee unless your OpenAI organisation has it). Synthetic essays only either way.
+    visq_provider: str = "openrouter"
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    visq_model: str | None = None             # default: Visq's own model, or visq_openai_model with OpenAI
+    visq_openai_model: str = "gpt-5.4-mini-2026-03-17"   # the snapshot Pipeline 2 already uses
+    # How long the student page waits for the worker's Visq step before the server applies it offline (no model).
+    viva_followup_wait_seconds: int = 90
+
+    # Pipeline 2, "AI comparison" (interchangeability): AI comparison essays are generated once per assignment from
+    # the assignment prompt only (no student work leaves the backend). GPT essays use openai_api_key. The
+    # evaluated setup adds Qwen 3 14B and Gemma 3 27B from an Ollama server (needs a GPU with about 24 GB for
+    # Gemma); set p2_ollama_url to use them. Without it the set is GPT only and the report says it is weaker.
+    p2_generate_comparisons: bool = False
+    p2_ollama_url: str | None = None          # e.g. http://gpu-host:11434
 
 
 @lru_cache

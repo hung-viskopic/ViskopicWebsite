@@ -4,11 +4,27 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ErrorNote, Field, PageHeader, Status } from "@/components/ui";
+import { qtypeLabel } from "@/components/VivaPanel";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, useResource } from "@/lib/hooks";
-import type { VivaAssessment, VivaReport, VivaReportQuestion, VivaSignals, VivaTimeline } from "@/lib/types";
+import type { FollowupDecision, VivaAssessment, VivaReport, VivaReportQuestion, VivaSignals, VivaTimeline } from "@/lib/types";
 
 const ratingLabel = { consistent: "Consistent with authorship", unclear: "Unclear", concern: "Concern" } as const;
+const sourceText: Record<string, string> = {
+  visq: "Written by Visq, approved by reviewer",
+  visq_followup: "Follow-up asked by Visq, not approved in advance",
+  visq2: "Written by Visq 2 during the viva, not approved in advance",
+  ai_draft: "Drafted by AI, approved by reviewer",
+  template: "Template",
+  reviewer: "Written by reviewer",
+};
+const decisionReason: Record<FollowupDecision["reason"], string> = {
+  model: "",
+  no_answer: "no answer to follow up",
+  timeout: "the decision was not ready in time, so the viva moved on",
+  error: "Visq or transcription failed, so the viva moved on",
+  disabled: "follow-ups were off",
+};
 const modeLabel = {
   oral_recorded: "Spoken answers, recorded, no staff present",
   oral_video: "Spoken answers with webcam video, recorded, no staff present. The video was not analysed by software",
@@ -53,16 +69,38 @@ export default function VivaReportPage() {
           <dt>Opened</dt><dd>{fmtDate(inv.opened_at)}</dd>
           <dt>Started</dt><dd>{fmtDate(inv.started_at)}</dd>
           <dt>Submitted</dt><dd>{fmtDate(inv.submitted_at)}</dd>
+          <dt>Full screen</dt><dd>{inv.fullscreen_required ? "Required (laptop or desktop only)" : "Not required"}</dd>
           <dt>Time per question</dt><dd>{inv.prep_seconds}s to think, {inv.answer_seconds}s to answer</dd>
+          <dt>Questions</dt>
+          <dd>{inv.question_engine ?? "Reviewer"}</dd>
+          {inv.flow === "visq2" && (
+            <><dt>Visq 2 set</dt><dd>{inv.visq2_full ? "Full (7 viva questions)" : "Short (3 viva questions)"}, extension {Math.round((inv.extension_seconds ?? 0) / 60)} min</dd>
+              <dt>Previewed</dt><dd>{r.visq2?.previewed ? "Yes, the questions were reviewed before sending" : "No"}</dd></>
+          )}
+          {r.visq2?.status === "failed" && (<><dt>Visq</dt><dd className="error">Could not read the essay: {r.visq2.error}</dd></>)}
           <dt>Switched device or window</dt><dd>{r.session.second_sessions === 0 ? "No" : `${r.session.second_sessions} time(s)`}</dd>
           {inv.revoke_reason && (<><dt>Withdrawn</dt><dd>{fmtDate(inv.revoked_at)}: {inv.revoke_reason}</dd></>)}
         </dl>
         {!submitted && <p className="muted small">The full report appears once the student submits.</p>}
       </section>
 
+      {r.questions.length === 0 && inv.flow === "visq2" && (
+        <p className="muted">Visq writes the questions as the student goes; they appear here once released.</p>
+      )}
       {r.questions.map((q) => (
         <QuestionReport key={q.id} q={q} canAssess={r.can_manage && submitted} invitationId={id} onSaved={rep.reload} />
       ))}
+
+      {r.visq2?.note && (
+        <section className="card">
+          <h2>Visq&apos;s reviewer note</h2>
+          <p className="muted small">
+            A reading aid from Visq: it compares the wording of the answers with the essay&apos;s own structure. &quot;Not
+            evident&quot; is not &quot;wrong&quot;, and nothing in it is a finding about the student.
+          </p>
+          <div className="text-view viva-note">{r.visq2.note}</div>
+        </section>
+      )}
 
       {submitted && (
         <section className="card">
@@ -83,11 +121,20 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
   return (
     <section className="card viva-report-q">
       <div className="card-head">
-        <h2>Question {q.position}</h2>
-        <span className="muted small">{q.source === "ai_draft" ? "Drafted by AI, approved by reviewer" : q.source === "template" ? "Template" : "Written by reviewer"}</span>
+        <h2>
+          {q.source === "visq2" ? `${q.position}. ${qtypeLabel[q.qtype ?? ""] ?? "Question"}`
+            : q.parent_id ? `Follow-up to question ${q.position}` : `Question ${q.position}`}
+        </h2>
+        <span className="muted small">
+          {sourceText[q.source] ?? q.source}
+          {q.qtype && !q.parent_id && q.source !== "visq2" && ` · ${qtypeLabel[q.qtype] ?? q.qtype}`}
+        </span>
       </div>
       {q.passage && <blockquote className="viva-passage"><span className="label">Passage shown</span><p>{q.passage}</p></blockquote>}
       <p className="viva-q-text">{q.text}</p>
+      {q.reviewer_note && (
+        <p className="viva-reviewer-note small"><strong>What a good answer covers</strong> (not shown to the student): {q.reviewer_note}</p>
+      )}
 
       {q.answer_kind === null && <p className="muted">Not answered yet.</p>}
       {q.answer_kind === "skipped" && <p className="note">No answer: the time ran out.</p>}
@@ -112,9 +159,20 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
       )}
 
       {q.answer_kind && <Signals s={q.signals} seconds={q.seconds_taken} />}
+      {q.followup_decision && <Decision d={q.followup_decision} />}
       {canAssess && <Assessment invitationId={invitationId} questionId={q.id} current={q.assessment} canAssess onSaved={onSaved} />}
       {!canAssess && q.assessment && <p className="small">Rated: <strong>{ratingLabel[q.assessment.rating]}</strong>{q.assessment.note && `: ${q.assessment.note}`}</p>}
     </section>
+  );
+}
+
+function Decision({ d }: { d: FollowupDecision }) {
+  return (
+    <p className="muted small">
+      {d.action === "follow_up" ? "Visq asked a follow-up" : "No follow-up"}
+      {d.reason !== "model" && `: ${decisionReason[d.reason]}`}
+      {d.why && `. Visq's reason: ${d.why}`}
+    </p>
   );
 }
 
@@ -187,7 +245,8 @@ function Signals({ s, seconds }: { s: VivaSignals; seconds: number | null }) {
   if (seconds !== null) items.push(`Answered ${seconds}s after the question appeared`);
   items.push(s.focus_lost ? `Left the page ${s.focus_lost} time(s), ${s.away_seconds}s in total` : "Stayed on the page");
   if (s.paste_blocked) items.push(`${s.paste_blocked} paste attempt(s) blocked`);
-  if (s.fullscreen_exit) items.push(`Left full screen ${s.fullscreen_exit} time(s)`);
+  if (s.copy_blocked) items.push(`${s.copy_blocked} copy attempt(s) blocked`);
+  if (s.fullscreen_exit) items.push(`Left full screen ${s.fullscreen_exit} time(s)${s.fullscreen_out_seconds ? `, ${s.fullscreen_out_seconds}s in total` : ""}`);
   if (s.camera_unavailable) items.push("No camera video for this answer (camera off or unavailable)");
   if (s.late_write) items.push(`${s.late_write} answer(s) arrived after the time limit and were refused`);
   return (

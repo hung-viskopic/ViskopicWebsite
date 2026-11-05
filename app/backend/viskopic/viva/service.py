@@ -5,6 +5,7 @@ import base64
 import html
 import hashlib
 import hmac
+import json
 import logging
 import re
 import secrets
@@ -21,7 +22,7 @@ from ..db import tenant_tx
 from ..deps import institution_dek
 from ..mailer import Message, get_mailer
 from ..storage import get_storage
-from . import ai
+from . import ai, visq
 
 log = logging.getLogger("viskopic.viva")
 
@@ -102,15 +103,19 @@ def audio_key(institution_id, recording_id) -> str:
 
 def create_questions(conn: Connection, dek: bytes, institution_id: UUID, invitation_id: UUID,
                      questions: list[dict]) -> None:
+    """The questions, frozen as sent (reviewer, template). Visq 2 adds its own as it releases them."""
     for pos, q in enumerate(questions, start=1):
         qid = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
+        note = (q.get("reviewer_note") or "").strip()
         conn.execute(
             "INSERT INTO viva_questions (id, institution_id, invitation_id, position, text_ciphertext, "
-            "passage_ciphertext, passage_start, passage_end, source) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            "passage_ciphertext, passage_start, passage_end, source, qtype, reviewer_note_ciphertext) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (qid, institution_id, invitation_id, pos,
              crypto.encrypt(dek, q["text"].encode(), f"viva_question:{qid}"),
              crypto.encrypt(dek, q["passage"].encode(), f"viva_passage:{qid}") if q.get("passage") else None,
-             q.get("passage_start"), q.get("passage_end"), q["source"]))
+             q.get("passage_start"), q.get("passage_end"), q["source"], q.get("qtype"),
+             crypto.encrypt(dek, note.encode(), f"viva_question_note:{qid}") if note else None))
 
 
 def queue_email(conn: Connection, institution_id: UUID, invitation_id: UUID) -> None:
@@ -245,8 +250,275 @@ def run_transcribe(job: dict) -> None:
                      (job["id"],))
         record(conn, None, "viva.transcribed", "viva_recording", rec_id, {"provider": t.provider, "model": t.model},
                institution_id=iid, actor_label="worker")
+        _visq2_after_transcript(conn, iid, rec_id)
 
 
 def on_transcribe_failed(conn: Connection, job: dict, message: str) -> None:
     record(conn, None, "viva.transcription_failed", "viva_recording", job["viva_recording_id"], {"error": message},
            institution_id=job["institution_id"], actor_label="worker")
+    _visq2_after_transcript(conn, job["institution_id"], job["viva_recording_id"])   # go on with no text
+
+
+def _visq2_after_transcript(conn: Connection, iid: UUID, recording_id: UUID) -> None:
+    """A spoken answer in a Visq 2 viva: feed it into Visq once its transcript exists (or transcription failed)."""
+    row = conn.execute("SELECT r.question_id FROM viva_recordings r JOIN viva_invitations v ON v.id = r.invitation_id "
+                       "WHERE r.id = %s AND v.flow = 'visq2' AND v.status = 'in_progress'", (recording_id,)).fetchone()
+    if row:
+        queue_visq2_step(conn, iid, row["question_id"])
+
+
+# ------------------------------------------------------------------ Visq 2 (world-tree flow)
+#
+# Visq's state lives in viva_visq2_states, encrypted with the institution's key. Steps that may call a model run in
+# the worker: `visq2_prepare` when the invitation is created, `visq2_step` after each answer. The student page asks
+# for the next question; while a step is pending the server answers "waiting", and after viva_followup_wait_seconds
+# it applies the step itself offline (Visq's heuristics, no model), so a slow model never traps a student.
+# Writes are versioned: a slow worker can't overwrite a newer state.
+
+STAGE_QTYPE = {"wv_clarify": "clarify", "wv_extension": "extension", "wv_viva": "viva"}
+
+
+def state_aad(invitation_id) -> str:
+    return f"viva_visq2_state:{invitation_id}"
+
+
+def load_visq2(conn: Connection, dek: bytes, invitation_id: UUID, lock: bool = False) -> tuple[dict, dict | None]:
+    row = conn.execute("SELECT * FROM viva_visq2_states WHERE invitation_id = %s" + (" FOR UPDATE" if lock else ""),
+                       (invitation_id,)).fetchone()
+    state = None
+    if row and row["state_ciphertext"]:
+        state = json.loads(crypto.decrypt(dek, row["state_ciphertext"], state_aad(invitation_id)))
+    return row, state
+
+
+def save_visq2(conn: Connection, dek: bytes, invitation_id: UUID, state: dict, *, expect_version: int,
+               applied_question_id: UUID | None = None, status: str = "ready", engine: str | None = None,
+               error: str | None = None) -> bool:
+    row = conn.execute(
+        "UPDATE viva_visq2_states SET state_ciphertext = %s, version = version + 1, status = %s, "
+        "applied_question_id = COALESCE(%s, applied_question_id), engine = COALESCE(%s, engine), error = %s, "
+        "updated_at = now() WHERE invitation_id = %s AND version = %s RETURNING version",
+        (crypto.encrypt(dek, json.dumps(state).encode(), state_aad(invitation_id)), status, applied_question_id, engine,
+         error, invitation_id, expect_version)).fetchone()
+    return row is not None
+
+
+def _essay_and_topic(conn: Connection, dek: bytes, invitation_id: UUID) -> tuple[str, str]:
+    row = conn.execute(
+        "SELECT d.id AS document_id, t.text_enc, a.title, a.prompt FROM viva_invitations v JOIN cases c ON c.id = v.case_id "
+        "JOIN documents d ON d.id = c.document_id LEFT JOIN document_texts t ON t.document_id = d.id "
+        "LEFT JOIN assignments a ON a.id = d.assignment_id WHERE v.id = %s", (invitation_id,)).fetchone()
+    if row is None or row["text_enc"] is None:
+        raise VivaJobError("the submission's text is not available", permanent=True)
+    essay = crypto.decrypt(dek, row["text_enc"], f"document_text:{row['document_id']}").decode()
+    return essay, (row["prompt"] or row["title"] or "")
+
+
+def _done(conn: Connection, job: dict) -> None:
+    conn.execute("UPDATE jobs SET status = 'done', lease_until = NULL, updated_at = now() WHERE id = %s", (job["id"],))
+
+
+def _current_job(conn: Connection, job: dict) -> bool:
+    current = conn.execute("SELECT attempts FROM jobs WHERE id = %s FOR UPDATE", (job["id"],)).fetchone()
+    return current is not None and current["attempts"] == job["attempts"]
+
+
+def run_visq2_prepare(job: dict) -> None:
+    iid, inv_id = job["institution_id"], job["viva_invitation_id"]
+    with tenant_tx(iid) as conn:
+        inv = conn.execute("SELECT v.status, v.extension_seconds, v.visq2_full, s.status AS prep, s.version "
+                           "FROM viva_invitations v JOIN viva_visq2_states s ON s.invitation_id = v.id WHERE v.id = %s",
+                           (inv_id,)).fetchone()
+        if inv is None or inv["prep"] != "preparing" or inv["status"] in ("revoked", "expired", "failed"):
+            _done(conn, job)
+            return
+        dek = institution_dek(conn, iid)
+        essay, topic = _essay_and_topic(conn, dek, inv_id)
+    try:
+        state = visq.prepare(essay, topic, inv["extension_seconds"], inv["visq2_full"])
+    except visq.VisqUnavailable as e:
+        raise VivaJobError(str(e), permanent=True) from e
+    engine = visq.engine_label() + ("" if state.get("llm") else "; structure built offline (model unavailable)")
+    with tenant_tx(iid) as conn:
+        if not _current_job(conn, job):
+            return
+        if save_visq2(conn, dek, inv_id, state, expect_version=inv["version"], engine=engine):
+            record(conn, None, "viva.visq2_prepared", "viva_invitation", inv_id,
+                   {"engine": engine, "model_used": bool(state.get("llm"))}, institution_id=iid, actor_label="worker")
+        _done(conn, job)
+
+
+def on_visq2_prepare_failed(conn: Connection, job: dict, message: str) -> None:
+    conn.execute("UPDATE viva_visq2_states SET status = 'failed', error = %s, version = version + 1, updated_at = now() "
+                 "WHERE invitation_id = %s AND status = 'preparing'", (message[:300], job["viva_invitation_id"]))
+    record(conn, None, "viva.visq2_prepare_failed", "viva_invitation", job["viva_invitation_id"], {"error": message[:300]},
+           institution_id=job["institution_id"], actor_label="worker")
+
+
+# ------------------------------------------------------------------ Visq 2 preview (before the invitation exists)
+
+
+def preview_aad(preview_id, what: str) -> str:
+    return f"viva_visq2_preview_{what}:{preview_id}"
+
+
+def case_essay_and_topic(conn: Connection, dek: bytes, case_id: UUID) -> tuple[str, str]:
+    row = conn.execute(
+        "SELECT d.id AS document_id, t.text_enc, a.title, a.prompt FROM cases c JOIN documents d ON d.id = c.document_id "
+        "LEFT JOIN document_texts t ON t.document_id = d.id LEFT JOIN assignments a ON a.id = d.assignment_id "
+        "WHERE c.id = %s AND d.status <> 'removed'", (case_id,)).fetchone()
+    if row is None or row["text_enc"] is None:
+        raise VivaJobError("the submission's text is not available", permanent=True)
+    essay = crypto.decrypt(dek, row["text_enc"], f"document_text:{row['document_id']}").decode()
+    return essay, (row["prompt"] or row["title"] or "")
+
+
+def run_visq2_preview(job: dict) -> None:
+    """Visq reads the essay for a preview: the same prepare step as an invitation, plus the reviewer's draft."""
+    iid, pid = job["institution_id"], job["visq2_preview_id"]
+    with tenant_tx(iid) as conn:
+        pv = conn.execute("SELECT p.*, c.status AS case_status FROM viva_visq2_previews p JOIN cases c ON c.id = p.case_id "
+                          "WHERE p.id = %s", (pid,)).fetchone()
+        if pv is None or pv["status"] != "preparing" or pv["case_status"] == "withdrawn":
+            _done(conn, job)
+            return
+        dek = institution_dek(conn, iid)
+        essay, topic = case_essay_and_topic(conn, dek, pv["case_id"])
+    try:
+        state = visq.prepare(essay, topic, pv["extension_seconds"], pv["visq2_full"])
+        shown = visq.draft(state, essay)
+    except visq.VisqUnavailable as e:
+        raise VivaJobError(str(e), permanent=True) from e
+    engine = visq.engine_label() + ("" if state.get("llm") else "; structure built offline (model unavailable)")
+    with tenant_tx(iid) as conn:
+        if not _current_job(conn, job):
+            return
+        done = conn.execute(
+            "UPDATE viva_visq2_previews SET status = 'ready', state_ciphertext = %s, draft_ciphertext = %s, engine = %s, "
+            "error = NULL, updated_at = now() WHERE id = %s AND status = 'preparing' RETURNING id",
+            (crypto.encrypt(dek, json.dumps(state).encode(), preview_aad(pid, "state")),
+             crypto.encrypt(dek, json.dumps(shown).encode(), preview_aad(pid, "draft")), engine, pid)).fetchone()
+        if done:
+            record(conn, None, "viva.visq2_preview_ready", "viva_visq2_preview", pid,
+                   {"engine": engine, "model_used": bool(state.get("llm")), "clarifying": len(shown["clarify"]),
+                    "viva_drafts": len(shown["viva"])}, institution_id=iid, actor_label="worker")
+        _done(conn, job)
+
+
+def on_visq2_preview_failed(conn: Connection, job: dict, message: str) -> None:
+    conn.execute("UPDATE viva_visq2_previews SET status = 'failed', error = %s, updated_at = now() "
+                 "WHERE id = %s AND status = 'preparing'", (message[:300], job["visq2_preview_id"]))
+    record(conn, None, "viva.visq2_preview_failed", "viva_visq2_preview", job["visq2_preview_id"],
+           {"error": message[:300]}, institution_id=job["institution_id"], actor_label="worker")
+
+
+def load_preview(conn: Connection, dek: bytes, preview_id: UUID, lock: bool = False) -> tuple[dict | None, dict | None]:
+    """The preview row and the draft the reviewer is shown (None until it is ready)."""
+    row = conn.execute("SELECT * FROM viva_visq2_previews WHERE id = %s" + (" FOR UPDATE" if lock else ""),
+                       (preview_id,)).fetchone()
+    shown = None
+    if row and row["draft_ciphertext"]:
+        shown = json.loads(crypto.decrypt(dek, row["draft_ciphertext"], preview_aad(preview_id, "draft")))
+    return row, shown
+
+
+def start_visq2_state(conn: Connection, dek: bytes, institution_id: UUID, invitation_id: UUID,
+                      state: dict | None, engine: str | None) -> None:
+    """The invitation's Visq state: a prepared one (from a preview, or a link that was replaced) is used as it is, so
+    the student gets the clarifying questions the reviewer saw; otherwise Visq reads the essay in the worker."""
+    if state is not None:
+        conn.execute("INSERT INTO viva_visq2_states (invitation_id, institution_id, status, state_ciphertext, version, "
+                     "engine) VALUES (%s, %s, 'ready', %s, 1, %s)",
+                     (invitation_id, institution_id,
+                      crypto.encrypt(dek, json.dumps(state).encode(), state_aad(invitation_id)), engine))
+        return
+    conn.execute("INSERT INTO viva_visq2_states (invitation_id, institution_id) VALUES (%s, %s)",
+                 (invitation_id, institution_id))
+    conn.execute("INSERT INTO jobs (institution_id, kind, viva_invitation_id) VALUES (%s, 'visq2_prepare', %s)",
+                 (institution_id, invitation_id))
+
+
+def take_preview(conn: Connection, dek: bytes, preview_id: UUID, case_id: UUID, full: bool,
+                 extension_seconds: int) -> tuple[dict, str | None]:
+    """The prepared state of a ready preview for this case and these settings (raises ValueError otherwise)."""
+    row = conn.execute("SELECT * FROM viva_visq2_previews WHERE id = %s FOR UPDATE", (preview_id,)).fetchone()
+    if row is None or row["case_id"] != case_id:
+        raise ValueError("preview not found")
+    if row["status"] == "used":
+        raise ValueError("these questions were already sent; prepare them again")
+    if row["status"] != "ready":
+        raise ValueError("the questions are not ready yet")
+    if row["visq2_full"] != full or row["extension_seconds"] != extension_seconds:
+        raise ValueError("the set size or extension time changed after the questions were prepared; prepare them again")
+    state = json.loads(crypto.decrypt(dek, row["state_ciphertext"], preview_aad(preview_id, "state")))
+    return state, row["engine"]
+
+
+def mark_preview_used(conn: Connection, preview_id: UUID, invitation_id: UUID) -> None:
+    conn.execute("UPDATE viva_visq2_previews SET status = 'used', invitation_id = %s, updated_at = now() WHERE id = %s",
+                 (invitation_id, preview_id))
+
+
+def answer_text(conn: Connection, dek: bytes, question_id: UUID) -> str:
+    """The typed answer, or the newest transcript of a spoken one ("" when there is none)."""
+    resp = conn.execute("SELECT id, kind, answer_ciphertext FROM viva_responses WHERE question_id = %s",
+                        (question_id,)).fetchone()
+    if resp is None or resp["kind"] == "skipped":
+        return ""
+    if resp["kind"] == "typed":
+        return crypto.decrypt(dek, resp["answer_ciphertext"], f"viva_response:{resp['id']}").decode()
+    t = conn.execute(
+        "SELECT t.id, t.text_ciphertext FROM viva_transcripts t JOIN viva_recordings r ON r.id = t.recording_id "
+        "WHERE r.question_id = %s ORDER BY t.created_at DESC LIMIT 1", (question_id,)).fetchone()
+    return crypto.decrypt(dek, t["text_ciphertext"], f"viva_transcript:{t['id']}").decode() if t else ""
+
+
+def queue_visq2_step(conn: Connection, institution_id: UUID, question_id: UUID) -> None:
+    conn.execute("INSERT INTO jobs (institution_id, kind, viva_question_id) VALUES (%s, 'visq2_step', %s)",
+                 (institution_id, question_id))
+
+
+def run_visq2_step(job: dict) -> None:
+    """Feed one answer (or the empty answer of a timed-out question) into Visq's flow."""
+    iid, qid = job["institution_id"], job["viva_question_id"]
+    with tenant_tx(iid) as conn:
+        q = conn.execute("SELECT q.invitation_id, q.qtype, v.status FROM viva_questions q "
+                         "JOIN viva_invitations v ON v.id = q.invitation_id WHERE q.id = %s", (qid,)).fetchone()
+        dek = institution_dek(conn, iid)
+        row, state = load_visq2(conn, dek, q["invitation_id"]) if q else (None, None)
+        if q is None or row is None or state is None or row["applied_question_id"] == qid or q["status"] != "in_progress":
+            _done(conn, job)
+            return
+        text = answer_text(conn, dek, qid)
+        essay, _ = _essay_and_topic(conn, dek, q["invitation_id"])
+    try:
+        new = visq.take_answer(state, q["qtype"], text, essay)
+    except visq.VisqStateError as e:
+        raise VivaJobError(f"Visq did not take the answer: {e}", permanent=True) from e
+    with tenant_tx(iid) as conn:
+        if not _current_job(conn, job):
+            return
+        conn.execute("SELECT 1 FROM viva_invitations WHERE id = %s FOR NO KEY UPDATE", (q["invitation_id"],))
+        if save_visq2(conn, dek, q["invitation_id"], new, expect_version=row["version"], applied_question_id=qid):
+            record(conn, None, "viva.visq2_step", "viva_invitation", q["invitation_id"],
+                   {"question_id": str(qid), "stage": q["qtype"], "next": new.get("status")},
+                   institution_id=iid, actor_label="worker")
+        _done(conn, job)
+
+
+def on_visq2_step_failed(conn: Connection, job: dict, message: str) -> None:
+    """The page moves on through the offline fallback when it next asks; just record why."""
+    record(conn, None, "viva.visq2_step_failed", "viva_question", job["viva_question_id"], {"error": message[:300]},
+           institution_id=job["institution_id"], actor_label="worker")
+
+
+def apply_offline(conn: Connection, dek: bytes, iid: UUID, inv_id: UUID, row: dict, state: dict, cur: dict) -> dict:
+    """The fallback when the worker's step is late or failed: Visq's code-only path. Caller holds the invitation lock."""
+    text = answer_text(conn, dek, cur["id"])
+    essay, _ = _essay_and_topic(conn, dek, inv_id)
+    try:
+        new = visq.take_answer(state, cur["qtype"], text, essay, offline=True)
+    except visq.VisqStateError:
+        new = state
+    save_visq2(conn, dek, inv_id, new, expect_version=row["version"], applied_question_id=cur["id"])
+    return new
