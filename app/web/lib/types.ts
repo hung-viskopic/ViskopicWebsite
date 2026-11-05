@@ -349,5 +349,29 @@ export type VivaReport = {
     extension_seconds: number | null;
     note: string | null;
     note_error?: string;
+    /** The reviewer saw the questions before sending. */
+    previewed: boolean;
+  } | null;
+};
+
+/** Visq 2 preview, made before the invitation exists. */
+export type Visq2Preview = {
+  id: string;
+  status: "preparing" | "ready" | "failed" | "used";
+  error: string | null;
+  engine: string | null;
+  visq2_full: boolean;
+  extension_minutes: number;
+  created_at: string;
+  updated_at: string;
+  draft: {
+    /** Exactly what the student is asked first. */
+    clarify: { text: string }[];
+    /** Drafts: Visq writes these again from the student's own answers. */
+    extension: { prompt: string; scenario: boolean; available: boolean };
+    viva: { text: string; type: string }[];
+    insufficient: boolean;
+    insufficient_reason: string;
+    model_used: boolean;
   } | null;
 };

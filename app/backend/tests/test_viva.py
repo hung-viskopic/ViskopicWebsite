@@ -696,3 +696,52 @@ def test_copy_and_fullscreen_signals(client, tenant_factory):
     assert rep["invitation"]["fullscreen_required"] is True
     sig = rep["questions"][0]["signals"]
     assert sig["copy_blocked"] == 1 and sig["fullscreen_exit"] == 2 and sig["fullscreen_out_seconds"] == 15.5
+
+
+def test_visq2_preview_before_sending(client, tenant_factory, visq_on):
+    t = tenant_factory()
+    _, case_id, reviewer, viewer = visq2_case(client, t)
+    assert client.post(f"/api/cases/{case_id}/visq2-previews", headers=viewer, json={}).status_code in (403, 404)
+    r = client.post(f"/api/cases/{case_id}/visq2-previews", headers=reviewer, json={"extension_minutes": 6})
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert r.json()["status"] == "preparing" and r.json()["draft"] is None
+    drain()                                                     # visq2_preview
+    pv = client.get(f"/api/visq2-previews/{pid}", headers=reviewer).json()
+    assert pv["status"] == "ready" and "visq 2 world-tree" in pv["engine"]
+    d = pv["draft"]
+    assert d["clarify"] or d["extension"]["prompt"]
+    assert d["viva"] and all(q["text"] for q in d["viva"])
+    assert client.get(f"/api/visq2-previews/{pid}", headers=viewer).status_code in (403, 404)
+
+    # Settings must match what was prepared; then the student gets exactly the clarifying questions shown.
+    r = client.post(f"/api/cases/{case_id}/viva-invitations", headers=reviewer, json={
+        "kind": "reasoning", "flow": "visq2", "answer_format": "typed", "email": "student@example.ac.uk",
+        "prep_seconds": 0, "answer_seconds": 120, "extension_minutes": 9, "visq2_preview_id": pid})
+    assert r.status_code == 409 and "prepare them again" in r.json()["detail"]
+    inv = visq2_invite(client, reviewer, case_id, visq2_preview_id=pid)
+    again = client.post(f"/api/cases/{case_id}/viva-invitations", headers=reviewer, json={
+        "kind": "reasoning", "flow": "visq2", "answer_format": "typed", "email": "student@example.ac.uk",
+        "prep_seconds": 0, "answer_seconds": 120, "extension_minutes": 6, "visq2_preview_id": pid})
+    assert again.status_code == 409 and "already sent" in again.json()["detail"]
+    with owner_conn() as c:
+        assert c.execute("SELECT count(*) FROM jobs WHERE viva_invitation_id = %s AND kind = 'visq2_prepare'",
+                         (inv["id"],)).fetchone()[0] == 0          # nothing to prepare: the preview's state is used
+
+    # A new link before the student starts keeps the same prepared questions.
+    new = client.post(f"/api/viva-invitations/{inv['id']}/resend", headers=reviewer).json()
+    tok = token_of(new["test_link"])
+    session = pub(client, "POST", tok, "/start").json()["session"]
+    q = pub(client, "POST", tok, "/next", session).json()["question"]   # no worker run needed
+    first = d["clarify"][0]["text"] if d["clarify"] else d["extension"]["prompt"]
+    assert q["text"] == first
+
+    with owner_conn() as c:
+        blob = bytes(c.execute("SELECT draft_ciphertext FROM viva_visq2_previews WHERE id = %s", (pid,)).fetchone()[0])
+        status = c.execute("SELECT status FROM viva_visq2_previews WHERE id = %s", (pid,)).fetchone()[0]
+    assert status == "used" and first.encode()[:40] not in blob           # stored encrypted
+    other = tenant_factory("Other")
+    with app_conn() as c:
+        c.execute("SELECT set_config('app.institution_id', %s, false)", (other.id,))
+        assert c.execute("SELECT count(*) FROM viva_visq2_previews").fetchone()[0] == 0
+        c.execute("SELECT set_config('app.institution_id', '', false)")

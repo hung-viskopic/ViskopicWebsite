@@ -270,6 +270,31 @@ def prepare(essay: str, topic: str, extension_seconds: int, full: bool, offline:
     return st
 
 
+def draft(state: dict, essay: str, offline: bool = False) -> dict:
+    """What the reviewer previews before sending: the exact clarifying questions, and a draft of the extension and
+    the viva questions worked out on a copy of the state as if the student gave no clarifying answers. In the viva
+    Visq writes those two again from the student's own answers, so they may change. May call the model (the what-if
+    and the paraphrases); run it in the worker. The prepared state itself is not changed."""
+    wv = _worldviva(state, offline)
+    st = wv.state()
+    clarify = [{"text": c["prompt"]} for c in st.get("clarify", [])]
+    if st.get("status") == "clarify":
+        wv._make_extension(st, essay)            # Visq's own step, on our copy only
+    if st.get("status") == "ext_intro":
+        wv._make_plan(st)
+    ext = st.get("ext") or {}
+    plan = st.get("plan") or {}
+    return {
+        "clarify": clarify,
+        "extension": {"prompt": ext.get("prompt") or ext.get("none") or "", "scenario": bool(ext.get("scenario")),
+                      "available": bool(ext.get("prompt"))},
+        "viva": [{"text": i["prompt"], "type": i["type"]} for i in plan.get("items", [])],
+        "insufficient": bool(plan.get("insufficient")),
+        "insufficient_reason": plan.get("reason") or "",
+        "model_used": bool(st.get("llm")),
+    }
+
+
 def view(state: dict) -> dict:
     """What the student should see now (Visq's own view of its state)."""
     return _worldviva(state, offline=True).view(CODE)

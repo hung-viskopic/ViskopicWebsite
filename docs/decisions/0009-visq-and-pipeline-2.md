@@ -80,3 +80,21 @@ equal word thirds, at least 150 words, validated on a fresh pre-registered PERSU
   experimental (6 of 24 human BAWE essays fell below 0 in a small GPT-only check). Every AI comparison result carries
   a `threshold_validation` evidence item saying so, and the combined report adds a coverage note whenever P2 ran.
 - An essay under 150 words is *not eligible*, with the reason in plain words.
+
+## Addendum: preview Visq 2's questions before sending
+
+A teammate asked to see the AI's questions before an invitation goes out. Visq 2 fixes only its clarifying
+questions when it reads the essay; the what-if is built from the student's clarifying answers, and the viva plan from
+the what-if answer. We chose a preview that keeps the flow adaptive rather than a fixed, approved set (which would
+change how Visq works).
+
+- **Prepare questions** runs Visq's prepare step for the case (`visq2_preview` job, `viva_visq2_previews`, state and
+  draft encrypted). On a copy of the state we call Visq's own `_make_extension` and `_make_plan` as if no clarifying
+  answers were given, to show a draft what-if and draft viva questions. The vendored code is not edited.
+- **The clarifying questions are exact**: sending hands the prepared state to the invitation unchanged (no
+  `visq2_prepare` job), and a new link for an unstarted viva carries the same state. The what-if and viva questions
+  are labelled *Draft* and may differ in the viva.
+- The preview is bound to the set size and what-if time; changing either means preparing again. A preview is used
+  once. The report says whether the questions were previewed.
+- The API still accepts a Visq 2 invitation without a preview (Visq then reads the essay in the worker as before);
+  the web form always prepares first.

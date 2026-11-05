@@ -74,7 +74,8 @@ export default function VivaReportPage() {
           <dt>Questions</dt>
           <dd>{inv.question_engine ?? "Reviewer"}</dd>
           {inv.flow === "visq2" && (
-            <><dt>Visq 2 set</dt><dd>{inv.visq2_full ? "Full (7 viva questions)" : "Short (3 viva questions)"}, extension {Math.round((inv.extension_seconds ?? 0) / 60)} min</dd></>
+            <><dt>Visq 2 set</dt><dd>{inv.visq2_full ? "Full (7 viva questions)" : "Short (3 viva questions)"}, extension {Math.round((inv.extension_seconds ?? 0) / 60)} min</dd>
+              <dt>Previewed</dt><dd>{r.visq2?.previewed ? "Yes, the questions were reviewed before sending" : "No"}</dd></>
           )}
           {r.visq2?.status === "failed" && (<><dt>Visq</dt><dd className="error">Could not read the essay: {r.visq2.error}</dd></>)}
           <dt>Switched device or window</dt><dd>{r.session.second_sessions === 0 ? "No" : `${r.session.second_sessions} time(s)`}</dd>

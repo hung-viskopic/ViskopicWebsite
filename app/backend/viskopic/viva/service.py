@@ -355,6 +355,110 @@ def on_visq2_prepare_failed(conn: Connection, job: dict, message: str) -> None:
            institution_id=job["institution_id"], actor_label="worker")
 
 
+# ------------------------------------------------------------------ Visq 2 preview (before the invitation exists)
+
+
+def preview_aad(preview_id, what: str) -> str:
+    return f"viva_visq2_preview_{what}:{preview_id}"
+
+
+def case_essay_and_topic(conn: Connection, dek: bytes, case_id: UUID) -> tuple[str, str]:
+    row = conn.execute(
+        "SELECT d.id AS document_id, t.text_enc, a.title, a.prompt FROM cases c JOIN documents d ON d.id = c.document_id "
+        "LEFT JOIN document_texts t ON t.document_id = d.id LEFT JOIN assignments a ON a.id = d.assignment_id "
+        "WHERE c.id = %s AND d.status <> 'removed'", (case_id,)).fetchone()
+    if row is None or row["text_enc"] is None:
+        raise VivaJobError("the submission's text is not available", permanent=True)
+    essay = crypto.decrypt(dek, row["text_enc"], f"document_text:{row['document_id']}").decode()
+    return essay, (row["prompt"] or row["title"] or "")
+
+
+def run_visq2_preview(job: dict) -> None:
+    """Visq reads the essay for a preview: the same prepare step as an invitation, plus the reviewer's draft."""
+    iid, pid = job["institution_id"], job["visq2_preview_id"]
+    with tenant_tx(iid) as conn:
+        pv = conn.execute("SELECT p.*, c.status AS case_status FROM viva_visq2_previews p JOIN cases c ON c.id = p.case_id "
+                          "WHERE p.id = %s", (pid,)).fetchone()
+        if pv is None or pv["status"] != "preparing" or pv["case_status"] == "withdrawn":
+            _done(conn, job)
+            return
+        dek = institution_dek(conn, iid)
+        essay, topic = case_essay_and_topic(conn, dek, pv["case_id"])
+    try:
+        state = visq.prepare(essay, topic, pv["extension_seconds"], pv["visq2_full"])
+        shown = visq.draft(state, essay)
+    except visq.VisqUnavailable as e:
+        raise VivaJobError(str(e), permanent=True) from e
+    engine = visq.engine_label() + ("" if state.get("llm") else "; structure built offline (model unavailable)")
+    with tenant_tx(iid) as conn:
+        if not _current_job(conn, job):
+            return
+        done = conn.execute(
+            "UPDATE viva_visq2_previews SET status = 'ready', state_ciphertext = %s, draft_ciphertext = %s, engine = %s, "
+            "error = NULL, updated_at = now() WHERE id = %s AND status = 'preparing' RETURNING id",
+            (crypto.encrypt(dek, json.dumps(state).encode(), preview_aad(pid, "state")),
+             crypto.encrypt(dek, json.dumps(shown).encode(), preview_aad(pid, "draft")), engine, pid)).fetchone()
+        if done:
+            record(conn, None, "viva.visq2_preview_ready", "viva_visq2_preview", pid,
+                   {"engine": engine, "model_used": bool(state.get("llm")), "clarifying": len(shown["clarify"]),
+                    "viva_drafts": len(shown["viva"])}, institution_id=iid, actor_label="worker")
+        _done(conn, job)
+
+
+def on_visq2_preview_failed(conn: Connection, job: dict, message: str) -> None:
+    conn.execute("UPDATE viva_visq2_previews SET status = 'failed', error = %s, updated_at = now() "
+                 "WHERE id = %s AND status = 'preparing'", (message[:300], job["visq2_preview_id"]))
+    record(conn, None, "viva.visq2_preview_failed", "viva_visq2_preview", job["visq2_preview_id"],
+           {"error": message[:300]}, institution_id=job["institution_id"], actor_label="worker")
+
+
+def load_preview(conn: Connection, dek: bytes, preview_id: UUID, lock: bool = False) -> tuple[dict | None, dict | None]:
+    """The preview row and the draft the reviewer is shown (None until it is ready)."""
+    row = conn.execute("SELECT * FROM viva_visq2_previews WHERE id = %s" + (" FOR UPDATE" if lock else ""),
+                       (preview_id,)).fetchone()
+    shown = None
+    if row and row["draft_ciphertext"]:
+        shown = json.loads(crypto.decrypt(dek, row["draft_ciphertext"], preview_aad(preview_id, "draft")))
+    return row, shown
+
+
+def start_visq2_state(conn: Connection, dek: bytes, institution_id: UUID, invitation_id: UUID,
+                      state: dict | None, engine: str | None) -> None:
+    """The invitation's Visq state: a prepared one (from a preview, or a link that was replaced) is used as it is, so
+    the student gets the clarifying questions the reviewer saw; otherwise Visq reads the essay in the worker."""
+    if state is not None:
+        conn.execute("INSERT INTO viva_visq2_states (invitation_id, institution_id, status, state_ciphertext, version, "
+                     "engine) VALUES (%s, %s, 'ready', %s, 1, %s)",
+                     (invitation_id, institution_id,
+                      crypto.encrypt(dek, json.dumps(state).encode(), state_aad(invitation_id)), engine))
+        return
+    conn.execute("INSERT INTO viva_visq2_states (invitation_id, institution_id) VALUES (%s, %s)",
+                 (invitation_id, institution_id))
+    conn.execute("INSERT INTO jobs (institution_id, kind, viva_invitation_id) VALUES (%s, 'visq2_prepare', %s)",
+                 (institution_id, invitation_id))
+
+
+def take_preview(conn: Connection, dek: bytes, preview_id: UUID, case_id: UUID, full: bool,
+                 extension_seconds: int) -> tuple[dict, str | None]:
+    """The prepared state of a ready preview for this case and these settings (raises ValueError otherwise)."""
+    row = conn.execute("SELECT * FROM viva_visq2_previews WHERE id = %s FOR UPDATE", (preview_id,)).fetchone()
+    if row is None or row["case_id"] != case_id:
+        raise ValueError("preview not found")
+    if row["status"] == "used":
+        raise ValueError("these questions were already sent; prepare them again")
+    if row["status"] != "ready":
+        raise ValueError("the questions are not ready yet")
+    if row["visq2_full"] != full or row["extension_seconds"] != extension_seconds:
+        raise ValueError("the set size or extension time changed after the questions were prepared; prepare them again")
+    state = json.loads(crypto.decrypt(dek, row["state_ciphertext"], preview_aad(preview_id, "state")))
+    return state, row["engine"]
+
+
+def mark_preview_used(conn: Connection, preview_id: UUID, invitation_id: UUID) -> None:
+    conn.execute("UPDATE viva_visq2_previews SET status = 'used', invitation_id = %s, updated_at = now() WHERE id = %s",
+                 (invitation_id, preview_id))
+
+
 def answer_text(conn: Connection, dek: bytes, question_id: UUID) -> str:
     """The typed answer, or the newest transcript of a spoken one ("" when there is none)."""
     resp = conn.execute("SELECT id, kind, answer_ciphertext FROM viva_responses WHERE question_id = %s",

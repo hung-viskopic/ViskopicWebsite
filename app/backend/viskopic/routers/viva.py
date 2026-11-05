@@ -96,6 +96,50 @@ def draft(case_id: UUID, body: DraftIn, p: Principal = Depends(require_user), co
     return {"provider": "templates", "questions": [q.__dict__ for q in ai.template_questions(body.kind, body.count)]}
 
 
+# ------------------------------------------------------------------ Visq 2 preview
+
+
+class PreviewIn(BaseModel):
+    visq2_full: bool = False
+    extension_minutes: int = Field(default=6, ge=1, le=30)
+
+
+def _preview_out(row: dict, shown: dict | None) -> dict:
+    return {"id": row["id"], "status": row["status"], "error": row["error"], "engine": row["engine"],
+            "visq2_full": row["visq2_full"], "extension_minutes": row["extension_seconds"] // 60,
+            "created_at": row["created_at"], "updated_at": row["updated_at"], "draft": shown}
+
+
+@router.post("/cases/{case_id}/visq2-previews", status_code=201)
+def create_preview(case_id: UUID, body: PreviewIn, p: Principal = Depends(require_user),
+                   conn: Connection = Depends(tenant_conn)):
+    """Visq reads the essay now, so the reviewer can see its questions before sending the invitation."""
+    case = _case(conn, p, case_id, MANAGE)
+    if case["status"] == "withdrawn":
+        raise HTTPException(409, "the case was withdrawn because its document was removed")
+    if not visq.enabled():
+        raise HTTPException(422, "Visq is switched off (VISKOPIC_ALLOW_EXTERNAL_AI and a model key)")
+    row = conn.execute(
+        "INSERT INTO viva_visq2_previews (institution_id, case_id, created_by, visq2_full, extension_seconds) "
+        "VALUES (%s, %s, %s, %s, %s) RETURNING *",
+        (p.institution_id, case_id, p.user_id, body.visq2_full, body.extension_minutes * 60)).fetchone()
+    conn.execute("INSERT INTO jobs (institution_id, kind, visq2_preview_id) VALUES (%s, 'visq2_preview', %s)",
+                 (p.institution_id, row["id"]))
+    audit.record(conn, p, "viva.visq2_preview_requested", "viva_visq2_preview", row["id"],
+                 {"case_id": str(case_id), "full": body.visq2_full, "extension_minutes": body.extension_minutes})
+    return _preview_out(row, None)
+
+
+@router.get("/visq2-previews/{preview_id}")
+def get_preview(preview_id: UUID, p: Principal = Depends(require_user), conn: Connection = Depends(tenant_conn)):
+    dek = institution_dek(conn, p.institution_id)
+    row, shown = viva.load_preview(conn, dek, preview_id)
+    if row is None:
+        raise HTTPException(404, "preview not found")
+    _case(conn, p, row["case_id"], MANAGE)
+    return _preview_out(row, shown)
+
+
 # ------------------------------------------------------------------ invitations
 
 
@@ -122,6 +166,8 @@ class InvitationIn(BaseModel):
     # Switch off for students whose assistive tools don't work in full screen.
     fullscreen: bool = True
     extension_minutes: int = Field(default=6, ge=1, le=30)      # time for Visq 2's typed extension
+    # A ready Visq 2 preview for this case: the student gets the clarifying questions the reviewer saw.
+    visq2_preview_id: UUID | None = None
 
 
 @router.post("/cases/{case_id}/viva-invitations", status_code=201)
@@ -153,22 +199,34 @@ def create_invitation(case_id: UUID, body: InvitationIn, p: Principal = Depends(
             item.update(passage=text[span[0]:span[1]], passage_start=span[0], passage_end=span[1])
         questions.append(item)
     engine = visq.engine_label() if body.flow == "visq2" else "reviewer"
+    prepared = None
+    if body.flow == "visq2" and body.visq2_preview_id is not None:
+        dek = institution_dek(conn, p.institution_id)
+        try:
+            prepared, engine = viva.take_preview(conn, dek, body.visq2_preview_id, case_id, body.visq2_full,
+                                                 body.extension_minutes * 60)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
     out = _issue(conn, p, case_id, body.kind, body.answer_format, str(body.email), body.deadline_days,
                  body.prep_seconds, body.answer_seconds, questions, replaces=None, camera=body.camera,
                  engine=engine, flow=body.flow, visq2_full=body.visq2_full,
                  extension_seconds=body.extension_minutes * 60 if body.flow == "visq2" else None,
-                 fullscreen=body.fullscreen)
+                 fullscreen=body.fullscreen, visq2_state=prepared)
+    if prepared is not None:
+        viva.mark_preview_used(conn, body.visq2_preview_id, out["id"])
     audit.record(conn, p, "viva.invitation_created", "viva_invitation", out["id"],
                  {"case_id": str(case_id), "kind": body.kind, "format": body.answer_format, "camera": body.camera,
                   "questions": len(questions), "sources": sorted({q["source"] for q in questions}),
-                  "flow": body.flow, "engine": engine, "fullscreen": body.fullscreen})
+                  "flow": body.flow, "engine": engine, "fullscreen": body.fullscreen,
+                  "visq2_preview_id": str(body.visq2_preview_id) if prepared is not None else None})
     return out
 
 
 def _issue(conn: Connection, p: Principal, case_id: UUID, kind: str, fmt: str, email: str, deadline_days: int,
            prep: int, answer: int, questions: list[dict], replaces: UUID | None, camera: bool = False,
            engine: str | None = None, flow: str = "standard", visq2_full: bool = False,
-           extension_seconds: int | None = None, fullscreen: bool = False) -> dict:
+           extension_seconds: int | None = None, fullscreen: bool = False,
+           visq2_state: dict | None = None) -> dict:
     dek = institution_dek(conn, p.institution_id)
     token = viva.new_token()
     inv_id = conn.execute("SELECT gen_random_uuid() AS id").fetchone()["id"]
@@ -184,11 +242,9 @@ def _issue(conn: Connection, p: Principal, case_id: UUID, kind: str, fmt: str, e
          viva.now() + timedelta(days=deadline_days), prep, answer, p.user_id, replaces, engine, flow, visq2_full,
          extension_seconds, fullscreen))
     if flow == "visq2":
-        # Visq reads the essay in the worker; the student page waits ("one moment") if they open it before then.
-        conn.execute("INSERT INTO viva_visq2_states (invitation_id, institution_id) VALUES (%s, %s)",
-                     (inv_id, p.institution_id))
-        conn.execute("INSERT INTO jobs (institution_id, kind, viva_invitation_id) VALUES (%s, 'visq2_prepare', %s)",
-                     (p.institution_id, inv_id))
+        # A prepared state (from the reviewer's preview) is used as it is; otherwise Visq reads the essay in the
+        # worker and the student page waits ("one moment") if they open it before then.
+        viva.start_visq2_state(conn, dek, p.institution_id, inv_id, visq2_state, engine)
     else:
         viva.create_questions(conn, dek, p.institution_id, inv_id, questions)
     viva.queue_email(conn, p.institution_id, inv_id)
@@ -226,13 +282,20 @@ def resend(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
         if q["passage_ciphertext"]:
             item["passage"] = crypto.decrypt(dek, q["passage_ciphertext"], f"viva_passage:{q['id']}").decode()
         questions.append(item)
+    # A Visq 2 viva nobody has started keeps its prepared questions (the ones the reviewer may have previewed).
+    prepared = None
+    if inv["flow"] == "visq2":
+        row, state = viva.load_visq2(conn, dek, invitation_id)
+        if row is not None and row["status"] == "ready" and state is not None and not state.get("answers") \
+                and not state.get("clar_answers") and state.get("ci", 0) == 0:
+            prepared = state
     viva.revoke(conn, invitation_id, "replaced by a new link", p.user_id)
     remaining = max(1, (inv["deadline_at"] - viva.now()).days + 1) if inv["status"] != "expired" else 7
     out = _issue(conn, p, inv["case_id"], inv["viva_kind"], inv["answer_format"], email, min(remaining, 30),
                  inv["prep_seconds"], inv["answer_seconds"], questions, replaces=invitation_id,
                  camera=inv["camera_required"], engine=inv["question_engine"], flow=inv["flow"],
                  visq2_full=inv["visq2_full"], extension_seconds=inv["extension_seconds"],
-                 fullscreen=inv["fullscreen_required"])
+                 fullscreen=inv["fullscreen_required"], visq2_state=prepared)
     audit.record(conn, p, "viva.invitation_resent", "viva_invitation", out["id"], {"replaces": str(invitation_id)})
     return out
 
@@ -313,12 +376,24 @@ def report(invitation_id: UUID, p: Principal = Depends(require_user), conn: Conn
     }
 
 
+def _previewed(conn: Connection, inv: dict) -> bool:
+    """Whether the reviewer saw these questions before sending (this invitation, or the link it replaced)."""
+    row = conn.execute(
+        "WITH RECURSIVE chain(id, replaces_id, depth) AS ("
+        " SELECT id, replaces_id, 0 FROM viva_invitations WHERE id = %s"
+        " UNION ALL SELECT v.id, v.replaces_id, c.depth + 1 FROM viva_invitations v JOIN chain c ON v.id = c.replaces_id"
+        " WHERE c.depth < 20) "
+        "SELECT 1 FROM viva_visq2_previews WHERE invitation_id IN (SELECT id FROM chain) LIMIT 1", (inv["id"],)).fetchone()
+    return row is not None
+
+
 def _visq2_report(conn: Connection, dek: bytes, p: Principal, inv: dict) -> dict:
     """Visq's preparation status and its reviewer note (a reading aid comparing wording; never a score)."""
     row, state = viva.load_visq2(conn, dek, inv["id"])
     out = {"status": row["status"] if row else None, "error": row["error"] if row else None,
            "engine": row["engine"] if row else None, "full": inv["visq2_full"],
-           "extension_seconds": inv["extension_seconds"], "note": None}
+           "extension_seconds": inv["extension_seconds"], "note": None,
+           "previewed": _previewed(conn, inv)}
     if state is not None and inv["status"] == "submitted":
         essay = _submission_text(conn, p.institution_id, inv["document_id"])
         try:

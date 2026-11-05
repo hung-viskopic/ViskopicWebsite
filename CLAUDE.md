@@ -105,16 +105,18 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   short viva; each answer is fed in by a `visq2_step` job, and after `viva_followup_wait_seconds` the API applies
   the step offline. Visq's state is encrypted in `viva_visq2_states` (versioned writes). Typed or spoken answers
   (spoken ones are transcribed first; the extension is always typed). Visq 1
-  (drafted questions + follow-ups, 0007) is replaced; its tables stay for old vivas.
+  (drafted questions + follow-ups, 0007) is replaced; its tables stay for old vivas. Preview before sending
+  (`0010_visq2_previews.sql`, `visq2_preview` job): the reviewer sees the exact clarifying questions and a draft
+  what-if and viva questions; sending hands the prepared state over, and a new link keeps it until the student starts.
 - ✅ Viva MVP (6a/6b, `0005_viva.sql`, `routers/viva.py`, `routers/viva_public.py`, `viskopic/viva/`): reviewer sends
   a viva from a submission; student answers by token link, one server-released question at a time, spoken
   (recorded) or typed (paste blocked), deadlines enforced on the server, one session at a time. Report with
   recording, transcript, speech timeline, signals and per-answer ratings. Mailpit for email. Optional webcam
   recording (`0006_viva_camera.sql`, supervision mode `oral_video`): video for a person to watch, never analysed.
   Full screen required by default (`0009`, laptop/desktop only; leaving it covers the question, the clock keeps
-  running); copying the question is blocked. 20 viva tests.
+  running); copying the question is blocked. 21 viva tests.
 - 🔜 Next: evaluator with versioned θ → live/invigilated supervision → decisions with evidence snapshot →
-  appeals; an Ollama GPU host for the AI comparison's Qwen/Gemma families. 59 backend tests in total.
+  appeals; an Ollama GPU host for the AI comparison's Qwen/Gemma families. 60 backend tests in total.
 
 ## Working conventions
 
@@ -136,7 +138,8 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   recordings to OpenAI (transcription). Synthetic test essays only; false anywhere real
   student work could be present. Visq never writes to disk (its `WorldViva` storage is overridden); steps that may
   call a model run in the worker, never in the API; the reviewer note is never sent to the student; the AI never
-  rates answers. Visq 2 questions are written during the viva and not approved in advance (decision 0009).
+  rates answers. Visq 2's clarifying questions are previewed exactly; its what-if and viva questions are previewed as
+  drafts and written again from the student's answers (decision 0009, preview addendum).
 - `VISKOPIC_P2_GENERATE_COMPARISONS` sends only the assignment prompt to OpenAI. Never put student text in a
   comparison set.
 - Webcam video is for human review only. Never add face recognition, gaze tracking, emotion or object detection to

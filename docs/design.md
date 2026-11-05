@@ -167,7 +167,9 @@ Milestone 6c added ([`0007_visq_and_p2.sql`](../app/backend/migrations/0007_visq
 Visq 2 added ([`0008_visq2.sql`](../app/backend/migrations/0008_visq2.sql)): `viva_invitations.flow`
 (`standard` / `visq2`), the full-set switch and extension time; `viva_visq2_states` (Visq's state per invitation,
 encrypted, versioned); question source `visq2`; jobs `visq2_prepare` and `visq2_step`. The Visq 1 follow-up
-columns and table from 0007 are kept for old vivas but no longer written.
+columns and table from 0007 are kept for old vivas but no longer written. Previews
+([`0010_visq2_previews.sql`](../app/backend/migrations/0010_visq2_previews.sql)): `viva_visq2_previews` (per case,
+the prepared state and the reviewer's draft, both encrypted) and job `visq2_preview`.
 
 Next milestones add: `segments` (with pgvector embeddings), `evaluator_configs`, `evaluations`, `decisions`,
 `appeals`, and the later supervision modes (live, invigilated room, third-party proctor).
@@ -182,8 +184,11 @@ A reviewer sends a viva from a submission, in one of two flows.
 what it takes for granted. During the viva Visq asks clarifying questions only where the essay is silent, then a
 timed, typed **extension** (a what-if from outside the essay: what would you keep, drop or add), then a short viva
 (3 questions, or 7 with the full set) sampled from fixed types, some with one follow-up, each with a worked example
-on another topic on request. Questions depend on earlier answers, so they are written during the viva and not
-approved in advance (decision 0009); each is frozen in `viva_questions` (source `visq2`, its step in `qtype`) when
+on another topic on request. Before sending, the reviewer presses **Prepare questions**: a `visq2_preview` job runs
+Visq's prepare step and shows the exact clarifying questions plus a draft what-if and draft viva questions (worked
+out as if the student gave no clarifying answers). Sending hands that prepared state to the invitation, so the
+clarifying questions are the ones shown; the what-if and viva questions depend on the student's answers and may differ
+(decision 0009). Changing the set size or what-if time means preparing again. Each question is frozen in `viva_questions` (source `visq2`, its step in `qtype`) when
 released, with a server deadline. After each answer a `visq2_step` job feeds it into Visq; the page shows "Preparing
 the next question", and after `VISKOPIC_VIVA_FOLLOWUP_WAIT_SECONDS` (90 s) the server applies the step offline with
 Visq's heuristics. Visq's state is stored encrypted and versioned in `viva_visq2_states`. The report shows every
