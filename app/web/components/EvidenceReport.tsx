@@ -151,7 +151,7 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0, onSendVi
       <ErrorNote error={error} />
 
       {r.case && r.case.status !== "analysing" && (
-        <div className="split">
+        <div className="split reading">
           <div className="main-col">
             {groups.map(([title, run]) => run && (
               <RunEvidence key={title} title={title} run={run} selectedKey={selected?.key ?? null} onShow={show} />
@@ -220,7 +220,7 @@ function Summary({ r, style, ai, canManage, busy, onReanalyse, onSendViva }: {
         <p className="sentence">{sentence}</p>
         {lines.length > 0 && (
           <ul>
-            {lines.map(([k, t, v]) => <li key={k}><Status value="x" tone={t} label={k} /> <span>{v}</span></li>)}
+            {lines.map(([k, t, v]) => <li key={k}><Status value="x" tone={t} label={v} wrap /></li>)}
           </ul>
         )}
         {conf && (
@@ -432,7 +432,7 @@ function HighlightedText({ text, spans }: { text: string; spans: Span[] }) {
 
   return (
     <div className="essay-body" ref={ref} tabIndex={0}>
-      {parts.map((p, i) => (p.mark ? <mark key={i} className={i === parts.findIndex((x) => x.mark) ? "cur" : undefined}>{p.text}</mark> : <Fragment key={i}>{p.text}</Fragment>))}
+      {parts.map((p, i) => (p.mark ? <mark key={i}>{p.text}</mark> : <Fragment key={i}>{p.text}</Fragment>))}
     </div>
   );
 }

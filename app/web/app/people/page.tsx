@@ -117,7 +117,7 @@ export default function People() {
 
   return (
     <>
-      <PageHeader title="People and roles" />
+      <PageHeader title="People" meta="Invite colleagues and choose what each person can do. You can only give roles within your own area." />
 
       <div className="grid">
         <section className="card">

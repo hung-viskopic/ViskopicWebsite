@@ -437,3 +437,6 @@ details.quiet > summary { color: var(--blue); font-size: 15px; }
 .search { max-width: 420px; }
 .check-text { font-family: var(--serif); font-size: 18px; line-height: 1.8; white-space: pre-wrap; max-height: 62vh; overflow: auto; background: var(--surface); border-radius: var(--radius); padding: 28px 36px; }
 .inline-form { display: flex; flex-direction: column; gap: 12px; border: 2px solid var(--line-strong); border-radius: 12px; padding: 16px 18px; background: var(--surface); }
+.split.reading > .main-col { flex: 1 1 520px; }
+.split.reading > .side-col { flex: 1 1 460px; }
+ul.chips { list-style: none; padding: 0; margin-left: 0; }

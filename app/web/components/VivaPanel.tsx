@@ -71,7 +71,7 @@ function Invitation({ i, canManage, onDone }: { i: VivaInvitation; canManage: bo
       <div className="card-head" style={{ marginBottom: 0 }}>
         <div>
           <h2 style={{ margin: 0 }}>{kindLabel[i.viva_kind]}{i.flow === "visq2" ? ", questions by Visq" : ""}</h2>
-          <span className="muted small">Planned {fmtDate(i.created_at)} · due {fmtDate(i.deadline_at)} · {i.answered ?? 0} of {i.questions ?? 0} answered</span>
+          <span className="muted small">Planned {fmtDate(i.created_at)} · due {fmtDate(i.deadline_at)}{i.questions ? ` · ${i.answered ?? 0} of ${i.questions} answered` : ""}</span>
         </div>
         <Status value={i.status} tone={tone} />
       </div>

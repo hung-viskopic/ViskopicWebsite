@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ActionForm, Empty, ErrorNote, Field, PageHeader } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+import { activity } from "@/lib/activity";
 import { fmtDate, useResource } from "@/lib/hooks";
 
 type Institution = { name: string; slug: string; kms_key_ref: string; created_at: string };
@@ -34,11 +35,12 @@ export default function Settings() {
   }
 
   const now = Date.now();
-  const entries = (log.data ?? []).filter((e) => !filter || e.action.includes(filter) || e.actor_label.includes(filter));
+  const needle = filter.trim().toLowerCase();
+  const entries = (log.data ?? []).filter((e) => !needle || e.action.includes(needle) || activity(e.action).toLowerCase().includes(needle) || e.actor_label.toLowerCase().includes(needle));
 
   return (
     <>
-      <PageHeader title="Settings and audit" />
+      <PageHeader title="Settings" meta="Your university, Viskopic support access and the activity log." />
       <div className="grid">
         <section className="card">
           <h2>{inst.data?.name ?? "Institution"}</h2>
@@ -48,12 +50,12 @@ export default function Settings() {
             <dt>Created</dt><dd>{fmtDate(inst.data?.created_at)}</dd>
           </dl>
           <p className="muted small section-gap">
-            Student identities, files and text are encrypted with your institution&apos;s own key, which you can revoke.
+            Student identities, files and text are encrypted with your university&apos;s own key.
           </p>
         </section>
 
         <section className="card">
-          <h2>Support access</h2>
+          <h2>Viskopic support access</h2>
           <p className="muted small">
             Let Viskopic staff see job status and errors for a limited time. They never see documents or students.
           </p>
@@ -83,23 +85,30 @@ export default function Settings() {
 
       <section className="card">
         <div className="card-head">
-          <h2>Audit log</h2>
-          <input className="search" placeholder="Filter by action or person" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <div>
+            <h2>Activity log</h2>
+            <p className="muted small" style={{ margin: 0 }}>Every upload, role change and opened essay is recorded here. Entries can&apos;t be edited or deleted.</p>
+          </div>
+          <input className="search" type="search" aria-label="Filter the activity log" placeholder="Filter by what happened or who" value={filter} onChange={(e) => setFilter(e.target.value)} />
         </div>
         <ErrorNote error={log.error} />
         {entries.length === 0 && <Empty>No entries.</Empty>}
         {entries.length > 0 && (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead>
+              <thead><tr><th>When</th><th>Who</th><th>What happened</th><th>Details</th></tr></thead>
               <tbody>
                 {entries.map((e) => (
                   <tr key={e.id}>
                     <td>{fmtDate(e.at)}</td>
                     <td>{e.actor_label}</td>
-                    <td className="mono">{e.action}</td>
-                    <td className="mono muted audit-details">
-                      {Object.keys(e.details).length ? JSON.stringify(e.details) : e.target_type ? `${e.target_type} ${e.target_id}` : ""}
+                    <td>{activity(e.action)}</td>
+                    <td className="muted audit-details">
+                      <details>
+                        <summary className="small">Details</summary>
+                        <span className="mono small">{e.action}{" "}
+                          {Object.keys(e.details).length ? JSON.stringify(e.details) : e.target_type ? `${e.target_type} ${e.target_id}` : ""}</span>
+                      </details>
                     </td>
                   </tr>
                 ))}

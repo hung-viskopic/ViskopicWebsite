@@ -289,5 +289,8 @@ option to deploy into the university's own cloud account.
 6. 🟡 Viva MVP ✅ (invitations, Visq 2 world-tree vivas or the reviewer's own questions, timed
    spoken/typed answers enforced by the server, transcripts, speech timeline, signals, report and ratings). 🔜 Evaluator with versioned θ, live and
    invigilated supervision, decisions, appeals
-7. 🔜 An Ollama GPU host for the AI comparison's Qwen and Gemma families (the setting exists); a validated Δ student configuration (fewer, shorter
+7. ✅ Readable staff app (decision 0010): cases home grouped by next step (`GET /cases`), a focused text-check
+   page (`GET /cases/{id}/texts`), student readiness against the model's 8-essay / 1,650-word rule, evidence
+   beside the essay with exact statements on request, typed-only viva form, inline forms instead of browser dialogs
+8. 🔜 An Ollama GPU host for the AI comparison's Qwen and Gemma families (the setting exists); a validated Δ student configuration (fewer, shorter
    baseline essays) from the model team
