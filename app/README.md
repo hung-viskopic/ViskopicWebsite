@@ -116,8 +116,25 @@ The backend tests run against a real PostgreSQL so row-level security is genuine
 cd app/backend
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
-# with the compose stack running, use its Postgres as the test server:
-VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres pytest
+# with the compose stack running, use its Postgres as the test server. Its init script already created
+# viskopic_app, so pass that role's password (VISKOPIC_APP_PASSWORD in app/.env):
+VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres \
+VISKOPIC_TEST_APP_PASSWORD=viskopic_app pytest
+```
+
+The tests use a separate `viskopic_test` database and never change an existing role, so they can share the
+running stack's Postgres.
+
+**On Windows**, run them in a Linux container from the backend image: the upload sandbox uses the Unix-only
+`resource` module (rlimits), so the worker can't be imported on Windows. From `app/` in Git Bash:
+
+```sh
+docker compose build api
+MSYS_NO_PATHCONV=1 docker run --rm --network viskopic_default --user root \
+  -e VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@postgres:5432/postgres \
+  -e VISKOPIC_TEST_APP_PASSWORD=viskopic_app -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$(pwd -W)/backend:/src:ro" -w /src viskopic-api \
+  sh -c "pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q"
 ```
 
 They cover: operator isolation, cross-tenant isolation at API and raw-SQL level, delegated role rules, last-owner

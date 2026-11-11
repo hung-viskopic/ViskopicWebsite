@@ -127,7 +127,9 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
 ## Working conventions
 
 - Run backend tests against a real Postgres (RLS must actually be exercised):
-  `VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres pytest` in `app/backend`.
+  `VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres VISKOPIC_TEST_APP_PASSWORD=viskopic_app pytest`
+  in `app/backend` (the compose init already created `viskopic_app` with `VISKOPIC_APP_PASSWORD`). On Windows run
+  them in a container from the backend image (the sandbox needs Unix `resource`); see `app/README.md`.
 - Migrations: add a new numbered file in `app/backend/migrations/`; never edit an applied one.
 - Keep `docs/design.md` and this file updated when the design changes; record notable choices in `docs/decisions/`.
 - Owner develops on Windows (D:\VISKOPIC\ViskopicWebsite) with Docker Desktop. Keep `.sh` files LF.
