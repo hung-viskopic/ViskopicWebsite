@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .. import access, audit, crypto
 from ..access import MANAGE
-from ..analysis import interchangeability
+from ..analysis import consistency, interchangeability
 from ..auth import Principal, require_user
 from ..deps import institution_dek, tenant_conn
 
@@ -343,22 +343,30 @@ def get_student(student_id: UUID, p: Principal = Depends(require_user), conn: Co
 
 
 def baseline_summary(documents: list[dict]) -> dict:
-    """How much of the student's own writing is available. Thresholds are the MVP
-    defaults from the design and will become institution settings."""
+    """How much of the student's own writing the writing style check can use.
+
+    One rule, the one the Δ V1.3 model actually enforces (consistency.MIN_REFERENCE_DOCUMENTS documents of
+    consistency.MIN_WORDS usable words each), so this summary never says "ready" while the model refuses.
+    Confidence follows consistency.confidence_for. The product rule (3 essays, 1,500 words) applies once the
+    model team validates a student configuration.
+    """
     done = [d for d in documents if d["role"] == "baseline" and d["status"] == "completed"]
-    words = sum(d["word_count"] or 0 for d in done)
-    supervised = sum(1 for d in done if d["provenance"] == "supervised")
-    eligible = len(done) >= 3 and words >= 1500
+    usable = [d for d in done if (d["word_count"] or 0) >= consistency.MIN_WORDS]
+    words = sum(d["word_count"] or 0 for d in usable)
+    supervised = sum(1 for d in usable if d["provenance"] == "supervised")
+    n = len(usable)
+    eligible = n >= consistency.MIN_REFERENCE_DOCUMENTS
     if not eligible:
         confidence = None
-    elif supervised >= 2 and len(done) >= 5:
+    elif n >= 10 and supervised >= 2:
         confidence = "high"
-    elif supervised >= 1:
+    elif n >= 10:
         confidence = "medium"
     else:
         confidence = "low"
-    return {"essays": len(done), "words": words, "supervised": supervised,
-            "eligible": eligible, "confidence": confidence, "min_essays": 3, "min_words": 1500}
+    return {"essays": n, "words": words, "supervised": supervised, "too_short": len(done) - n,
+            "eligible": eligible, "confidence": confidence,
+            "min_essays": consistency.MIN_REFERENCE_DOCUMENTS, "min_words": consistency.MIN_WORDS}
 
 
 @router.patch("/students/{student_id}")

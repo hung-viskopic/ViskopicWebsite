@@ -24,29 +24,23 @@ export default function Departments() {
 
   return (
     <>
-      <PageHeader title="Departments" />
+      <PageHeader title="Departments" meta="Courses belong to a department. Department admins manage the courses and people in theirs." />
       <section className="card">
+        <h2>Add a department</h2>
         <ActionForm onSubmit={create} submitLabel="Add department" inline>
           <Field label="Name"><input name="name" required placeholder="School of Law" /></Field>
         </ActionForm>
       </section>
-      <section className="card">
-        <ErrorNote error={list.error} />
-        {list.data?.length === 0 && <Empty>No departments yet. Add one before creating courses.</Empty>}
-        {list.data && list.data.length > 0 && (
-          <table>
-            <thead><tr><th>Department</th><th>Status</th><th /></tr></thead>
-            <tbody>
-              {list.data.map((d) => (
-                <tr key={d.id}>
-                  <td>{d.name}</td>
-                  <td><Status value={d.status} /></td>
-                  <td><button className="btn secondary" onClick={() => toggle(d)}>{d.status === "active" ? "Archive" : "Restore"}</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <ErrorNote error={list.error} />
+      <section className="group">
+        {list.data?.length === 0 && <div className="row"><Empty>No departments yet. Add one before adding courses.</Empty></div>}
+        {list.data?.map((d) => (
+          <div key={d.id} className="row">
+            <div className="grow"><span className="who">{d.name}</span></div>
+            {d.status !== "active" && <Status value={d.status} />}
+            <button className="link" onClick={() => toggle(d)}>{d.status === "active" ? "Archive" : "Restore"}</button>
+          </div>
+        ))}
       </section>
     </>
   );

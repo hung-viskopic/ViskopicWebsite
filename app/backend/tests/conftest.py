@@ -2,7 +2,11 @@
 in-memory object storage, and locally signed OIDC tokens.
 
 Point VISKOPIC_TEST_ADMIN_URL at a Postgres superuser connection, e.g. the compose
-database:  postgresql://viskopic:viskopic@localhost:5432/postgres
+database:  postgresql://viskopic:viskopic@localhost:15432/postgres
+
+The tests connect as the cluster-wide role `viskopic_app`. On a fresh server they create it with the
+password "app". If it already exists (the compose database creates it at init with VISKOPIC_APP_PASSWORD
+from app/.env), set VISKOPIC_TEST_APP_PASSWORD to its password; the tests never change an existing role.
 """
 import base64
 import io
@@ -11,6 +15,7 @@ import os
 import time
 import uuid
 import zipfile
+from collections.abc import Mapping
 
 import jwt
 import psycopg
@@ -31,8 +36,9 @@ def _url(base: str, user: str, password: str, db: str) -> str:
     return f"postgresql://{user}:{password}@{rest}/{db}"
 
 
+APP_PASSWORD = os.environ.get("VISKOPIC_TEST_APP_PASSWORD", "app")
 OWNER_URL = _url(ADMIN_URL, "viskopic_owner_test", "owner", DB)
-APP_URL = _url(ADMIN_URL, "viskopic_app", "app", DB)
+APP_URL = _url(ADMIN_URL, "viskopic_app", APP_PASSWORD, DB)
 
 os.environ.update({
     "VISKOPIC_DATABASE_URL": APP_URL,
@@ -48,10 +54,17 @@ os.environ.update({
 def database():
     with psycopg.connect(ADMIN_URL, autocommit=True) as c:
         c.execute(f"DROP DATABASE IF EXISTS {DB} WITH (FORCE)")
-        for role, pw in (("viskopic_owner_test", "owner"), ("viskopic_app", "app")):
+        for role, pw in (("viskopic_owner_test", "owner"), ("viskopic_app", APP_PASSWORD)):
             if not c.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone():
                 c.execute(f"CREATE ROLE {role} LOGIN PASSWORD '{pw}' NOSUPERUSER NOBYPASSRLS")
         c.execute(f"CREATE DATABASE {DB} OWNER viskopic_owner_test")
+    # Fail fast with a clear message instead of a pool timeout in every test.
+    try:
+        psycopg.connect(_url(ADMIN_URL, "viskopic_app", APP_PASSWORD, DB), connect_timeout=5).close()
+    except psycopg.OperationalError as e:
+        pytest.exit(f"cannot connect as viskopic_app ({e}). If the role already exists on this server, "
+                    "set VISKOPIC_TEST_APP_PASSWORD to its password (compose: VISKOPIC_APP_PASSWORD in app/.env).",
+                    returncode=2)
     from viskopic.migrate import migrate
 
     assert migrate(OWNER_URL)
@@ -83,7 +96,26 @@ def auth(sub: str, email: str | None = None, roles: list[str] | None = None, ver
     return {"Authorization": f"Bearer {token(sub, email, roles, verified)}"}
 
 
-OPERATOR = auth("operator-1", "ops@viskopic.test", ["platform_operator"])
+class _FreshAuth(Mapping):
+    """Headers that sign a new token on every request, so a long run can't outlive a module-level token."""
+
+    def __init__(self, *args):
+        self._args = args
+
+    def _headers(self) -> dict:
+        return auth(*self._args)
+
+    def __getitem__(self, key):
+        return self._headers()[key]
+
+    def __iter__(self):
+        return iter(self._headers())
+
+    def __len__(self):
+        return 1
+
+
+OPERATOR = _FreshAuth("operator-1", "ops@viskopic.test", ["platform_operator"])
 
 
 class Tenant:

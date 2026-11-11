@@ -115,13 +115,21 @@ owner can't be removed. Users sign in via OIDC; invitations match a **verified**
   recording (`0006_viva_camera.sql`, supervision mode `oral_video`): video for a person to watch, never analysed.
   Full screen required by default (`0009`, laptop/desktop only; leaving it covers the question, the clock keeps
   running); copying the question is blocked. 21 viva tests.
+- ✅ Readable staff UI (decision 0010): `GET /cases` (home page, grouped by `next_step`), `GET /cases/{id}/texts`
+  + `/check/[caseId]` page, `baseline_summary` counts only essays meeting the model's word minimum (`too_short`),
+  evidence as plain heading + two numbers with the exact template statement under "Exact finding", technical
+  details folded. Spoken answers and webcam are hidden in the viva form (typed only); the spoken path is kept.
+  Fonts: Atkinson Hyperlegible Next (UI) and Literata (essays). Plain-language wording lives in `web/lib/words.ts`
+  and `web/lib/activity.ts`; never use it to replace a template statement.
 - 🔜 Next: evaluator with versioned θ → live/invigilated supervision → decisions with evidence snapshot →
-  appeals; an Ollama GPU host for the AI comparison's Qwen/Gemma families. 60 backend tests in total.
+  appeals; an Ollama GPU host for the AI comparison's Qwen/Gemma families. 63 backend tests in total.
 
 ## Working conventions
 
 - Run backend tests against a real Postgres (RLS must actually be exercised):
-  `VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres pytest` in `app/backend`.
+  `VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres VISKOPIC_TEST_APP_PASSWORD=viskopic_app pytest`
+  in `app/backend` (the compose init already created `viskopic_app` with `VISKOPIC_APP_PASSWORD`). On Windows run
+  them in a container from the backend image (the sandbox needs Unix `resource`); see `app/README.md`.
 - Migrations: add a new numbered file in `app/backend/migrations/`; never edit an applied one.
 - Keep `docs/design.md` and this file updated when the design changes; record notable choices in `docs/decisions/`.
 - Owner develops on Windows (D:\VISKOPIC\ViskopicWebsite) with Docker Desktop. Keep `.sh` files LF.

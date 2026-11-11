@@ -5,6 +5,10 @@ import { useState } from "react";
 import { Empty, ErrorNote, PageHeader, Status } from "@/components/ui";
 import { useResource } from "@/lib/hooks";
 import type { Student } from "@/lib/types";
+import { plural } from "@/lib/words";
+
+/** The writing style check needs this many past essays (the model's own rule). */
+const NEEDED = 8;
 
 export default function Students() {
   const list = useResource<Student[]>("/students");
@@ -20,33 +24,32 @@ export default function Students() {
 
   return (
     <>
-      <PageHeader title="Students">
-        <input className="search" type="search" placeholder="Search students" value={q} onChange={(e) => setQ(e.target.value)} />
+      <PageHeader title="Students" meta="You see each student's number and name; the checks only ever see the pseudonym. Open a student to see whether the writing style check can run.">
+        <input className="search" type="search" aria-label="Search students" placeholder="Search by pseudonym, number or name"
+          value={q} onChange={(e) => setQ(e.target.value)} />
       </PageHeader>
-      <section className="card">
-        <ErrorNote error={list.error} />
-        {list.data?.length === 0 && <Empty>No students yet. Add them from a course page.</Empty>}
-        {list.data && list.data.length > 0 && rows.length === 0 && <Empty>No students match your search.</Empty>}
-        {rows.length > 0 && (
-          <div className="table-wrap">
-          <table>
-            <thead><tr><th>Pseudonym</th><th>Student number</th><th>Name</th><th>Baseline essays</th><th>Submissions</th><th>Status</th></tr></thead>
-            <tbody>
-              {rows.map((s) => (
-                <tr key={s.id}>
-                  <td><Link href={`/students/${s.id}`}>{s.pseudonym}</Link></td>
-                  <td>{s.external_ref}</td>
-                  <td>{s.display_name ?? "-"}</td>
-                  <td>{s.baseline_docs}</td>
-                  <td>{s.submissions}</td>
-                  <td><Status value={s.status} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        )}
+      <ErrorNote error={list.error} />
+      <section className="group">
+        {list.data?.length === 0 && <div className="row"><Empty>No students yet. Add them from a course.</Empty></div>}
+        {list.data && list.data.length > 0 && rows.length === 0 && <div className="row"><Empty>No students match “{q}”.</Empty></div>}
+        {rows.map((s) => {
+          const n = s.baseline_docs ?? 0;
+          return (
+            <div className="row" key={s.id}>
+              <div className="grow">
+                <Link href={`/students/${s.id}`} className="who link">{s.pseudonym}</Link>
+                <span className="sub">{s.external_ref}{s.display_name ? ` · ${s.display_name}` : ""} · {plural(s.submissions ?? 0, "essay")} checked</span>
+              </div>
+              <div style={{ flex: "0 1 260px", minWidth: 200 }}>
+                <div className="progress" aria-hidden><span style={{ width: `${Math.min(100, (n / NEEDED) * 100)}%`, background: n >= NEEDED ? "var(--ok)" : "var(--ink-2)" }} /></div>
+                <span className="small muted">{n >= NEEDED ? `Enough past essays (${n} of ${NEEDED} needed)` : `${n} of ${NEEDED} past essays uploaded`}</span>
+              </div>
+              {s.status !== "active" && <Status value={s.status} />}
+            </div>
+          );
+        })}
       </section>
+      <p className="hint">Past essays must each have at least 1,650 words to count. The student page shows which ones are too short.</p>
     </>
   );
 }

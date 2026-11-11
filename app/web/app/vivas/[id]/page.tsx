@@ -7,6 +7,7 @@ import { ErrorNote, Field, PageHeader, Status } from "@/components/ui";
 import { qtypeLabel } from "@/components/VivaPanel";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, useResource } from "@/lib/hooks";
+import { plural } from "@/lib/words";
 import type { FollowupDecision, VivaAssessment, VivaReport, VivaReportQuestion, VivaSignals, VivaTimeline } from "@/lib/types";
 
 const ratingLabel = { consistent: "Consistent with authorship", unclear: "Unclear", concern: "Concern" } as const;
@@ -34,6 +35,7 @@ const modeLabel = {
 export default function VivaReportPage() {
   const { id } = useParams<{ id: string }>();
   const rep = useResource<VivaReport>(`/viva-invitations/${id}/report`);
+  const [sel, setSel] = useState<string>("");
   // Transcripts arrive a little after submission; refresh until none is pending.
   const pending = rep.data?.questions.some((q) => q.transcript_job === "queued" || q.transcript_job === "running");
   useEffect(() => {
@@ -42,82 +44,126 @@ export default function VivaReportPage() {
     return () => clearInterval(t);
   }, [pending, rep.reload]);
 
+  useEffect(() => {
+    if (!rep.data || sel) return;
+    const first = rep.data.questions.find((q) => !q.assessment) ?? rep.data.questions[0];
+    setSel(first?.id ?? "overall");
+  }, [rep.data, sel]);
+
   if (rep.error) return <ErrorNote error={rep.error} />;
   if (!rep.data) return <p className="muted">Loading…</p>;
   const r = rep.data;
   const inv = r.invitation;
   const submitted = inv.status === "submitted";
+  const qs = r.questions;
+  const rated = qs.filter((q) => q.assessment).length;
+  const idx = qs.findIndex((q) => q.id === sel);
+  const q = idx >= 0 ? qs[idx] : null;
+
+  function next() {
+    const after = qs.slice(idx + 1).find((x) => !x.assessment) ?? qs.find((x, k) => k !== idx && !x.assessment);
+    setSel(after?.id ?? "overall");
+  }
 
   return (
     <>
+      <Link href={`/documents/${inv.document_id}?tab=viva`} className="back">← Back to the case</Link>
       <PageHeader
         title={`${inv.viva_kind === "style" ? "Style" : "Reasoning"} viva`}
-        meta={<><Link href={`/documents/${inv.document_id}`}>Back to the submission</Link> · Sent {fmtDate(inv.created_at)}</>}
+        meta={submitted ? `Finished ${fmtDate(inv.submitted_at)} · ${rated} of ${qs.length} answers rated` : `Planned ${fmtDate(inv.created_at)}`}
       >
         <Status value={inv.status} />
       </PageHeader>
 
-      <p className="note">
+      <p className="note info">
         {inv.is_test && "Test viva. "}
-        {modeLabel[inv.supervision_mode]}. Signals below are hints, not evidence: browser signals are reported by the
-        student&apos;s browser and can be missing. Rate each answer on what you hear or read.
+        {modeLabel[inv.supervision_mode]}. The notes under each answer are hints reported by the student&apos;s
+        browser and can be missing. Rate each answer on what you read.
       </p>
 
-      <section className="card">
-        <h2>Session</h2>
-        <dl className="meta">
-          <dt>Opened</dt><dd>{fmtDate(inv.opened_at)}</dd>
-          <dt>Started</dt><dd>{fmtDate(inv.started_at)}</dd>
-          <dt>Submitted</dt><dd>{fmtDate(inv.submitted_at)}</dd>
-          <dt>Full screen</dt><dd>{inv.fullscreen_required ? "Required (laptop or desktop only)" : "Not required"}</dd>
-          <dt>Time per question</dt><dd>{inv.prep_seconds}s to think, {inv.answer_seconds}s to answer</dd>
-          <dt>Questions</dt>
-          <dd>{inv.question_engine ?? "Reviewer"}</dd>
-          {inv.flow === "visq2" && (
-            <><dt>Visq 2 set</dt><dd>{inv.visq2_full ? "Full (7 viva questions)" : "Short (3 viva questions)"}, extension {Math.round((inv.extension_seconds ?? 0) / 60)} min</dd>
-              <dt>Previewed</dt><dd>{r.visq2?.previewed ? "Yes, the questions were reviewed before sending" : "No"}</dd></>
+      <div className="split">
+        <aside className="side-col sticky stack-sm" style={{ flexBasis: 300, flexGrow: 0 }}>
+          {qs.length > 0 && (
+            <nav className="qnav" aria-label="Answers">
+              {qs.map((x) => (
+                <button key={x.id} className={x.id === sel ? "on" : ""} onClick={() => setSel(x.id)} aria-current={x.id === sel ? "true" : undefined}>
+                  <b className={x.assessment ? "" : "open"}>{x.position}</b>
+                  <span>{x.parent_id ? "Follow-up" : qtypeLabel[x.qtype ?? ""] ?? "Question"}
+                    {x.text && <span className="qnav-gist">{gist(x.text)}</span>}
+                    <small>{x.assessment ? ratingLabel[x.assessment.rating] : x.answer_kind === null ? "Not answered" : x.answer_kind === "skipped" ? "No answer" : "Not rated"}</small>
+                  </span>
+                </button>
+              ))}
+              {submitted && (
+                <button className={sel === "overall" ? "on" : ""} onClick={() => setSel("overall")}>
+                  <b className={r.overall ? "" : "open"}>✓</b>
+                  <span>Overall<small>{r.overall ? ratingLabel[r.overall.rating] : "Not rated"}</small></span>
+                </button>
+              )}
+            </nav>
           )}
-          {r.visq2?.status === "failed" && (<><dt>Visq</dt><dd className="error">Could not read the essay: {r.visq2.error}</dd></>)}
-          <dt>Switched device or window</dt><dd>{r.session.second_sessions === 0 ? "No" : `${r.session.second_sessions} time(s)`}</dd>
-          {inv.revoke_reason && (<><dt>Withdrawn</dt><dd>{fmtDate(inv.revoked_at)}: {inv.revoke_reason}</dd></>)}
-        </dl>
-        {!submitted && <p className="muted small">The full report appears once the student submits.</p>}
-      </section>
+          <details className="card" style={{ marginBottom: 0 }}>
+            <summary>About this viva</summary>
+            <dl className="meta" style={{ marginTop: 12 }}>
+              <dt>Opened</dt><dd>{fmtDate(inv.opened_at)}</dd>
+              <dt>Started</dt><dd>{fmtDate(inv.started_at)}</dd>
+              <dt>Finished</dt><dd>{fmtDate(inv.submitted_at)}</dd>
+              <dt>Full screen</dt><dd>{inv.fullscreen_required ? "Required" : "Not required"}</dd>
+              <dt>Time per question</dt><dd>{inv.prep_seconds}s to think, {inv.answer_seconds}s to answer</dd>
+              <dt>Questions by</dt><dd>{inv.question_engine ?? "Reviewer"}</dd>
+              {inv.flow === "visq2" && (
+                <><dt>Visq 2 set</dt><dd>{inv.visq2_full ? "Full (7 viva questions)" : "Short (3 viva questions)"}, what-if {Math.round((inv.extension_seconds ?? 0) / 60)} min</dd>
+                  <dt>Previewed</dt><dd>{r.visq2?.previewed ? "Yes" : "No"}</dd></>
+              )}
+              {r.visq2?.status === "failed" && (<><dt>Visq</dt><dd className="error">Could not read the essay: {r.visq2.error}</dd></>)}
+              <dt>Opened on another device</dt><dd>{r.session.second_sessions === 0 ? "No" : plural(r.session.second_sessions, "time")}</dd>
+              {inv.revoke_reason && (<><dt>Withdrawn</dt><dd>{fmtDate(inv.revoked_at)}: {inv.revoke_reason}</dd></>)}
+            </dl>
+          </details>
+        </aside>
 
-      {r.questions.length === 0 && inv.flow === "visq2" && (
-        <p className="muted">Visq writes the questions as the student goes; they appear here once released.</p>
-      )}
-      {r.questions.map((q) => (
-        <QuestionReport key={q.id} q={q} canAssess={r.can_manage && submitted} invitationId={id} onSaved={rep.reload} />
-      ))}
-
-      {r.visq2?.note && (
-        <section className="card">
-          <h2>Visq&apos;s reviewer note</h2>
-          <p className="muted small">
-            A reading aid from Visq: it compares the wording of the answers with the essay&apos;s own structure. &quot;Not
-            evident&quot; is not &quot;wrong&quot;, and nothing in it is a finding about the student.
-          </p>
-          <div className="text-view viva-note">{r.visq2.note}</div>
-        </section>
-      )}
-
-      {submitted && (
-        <section className="card">
-          <h2>Overall</h2>
-          <Assessment invitationId={id} questionId={null} current={r.overall} canAssess={r.can_manage} onSaved={rep.reload} />
-          <p className="muted small section-gap">
-            A rating records your view of the viva. It is not a decision on the case; decisions and appeals come later.
-          </p>
-        </section>
-      )}
+        <div className="main-col">
+          {!submitted && <p className="muted">The answers appear here once the student finishes.</p>}
+          {qs.length === 0 && inv.flow === "visq2" && (
+            <p className="muted">Visq writes the questions as the student goes; they appear here once asked.</p>
+          )}
+          {q && <QuestionReport key={q.id} q={q} />}
+          {q && submitted && (
+            <section className="card">
+              <Assessment key={q.id} invitationId={id} questionId={q.id} current={q.assessment} canAssess={r.can_manage}
+                onSaved={() => { rep.reload(); next(); }} />
+            </section>
+          )}
+          {sel === "overall" && submitted && (
+            <>
+              {r.visq2?.note && (
+                <section className="card">
+                  <h2>Visq&apos;s reading note</h2>
+                  <p className="muted small">
+                    A reading aid: it compares the wording of the answers with the essay&apos;s own structure.
+                    &quot;Not evident&quot; is not &quot;wrong&quot;, and nothing in it is a finding about the student.
+                  </p>
+                  <div className="text-view viva-note">{r.visq2.note}</div>
+                </section>
+              )}
+              <section className="card">
+                <h2>Your overall view</h2>
+                <Assessment key="overall" invitationId={id} questionId={null} current={r.overall} canAssess={r.can_manage} onSaved={rep.reload} />
+              </section>
+            </>
+          )}
+          {submitted && (
+            <p className="hint">
+              A rating records your view of the viva. It is not a decision on the case.
+            </p>
+          )}
+        </div>
+      </div>
     </>
   );
 }
 
-function QuestionReport({ q, canAssess, invitationId, onSaved }: {
-  q: VivaReportQuestion; canAssess: boolean; invitationId: string; onSaved: () => void;
-}) {
+function QuestionReport({ q }: { q: VivaReportQuestion }) {
   return (
     <section className="card viva-report-q">
       <div className="card-head">
@@ -131,14 +177,22 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
         </span>
       </div>
       {q.passage && <blockquote className="viva-passage"><span className="label">Passage shown</span><p>{q.passage}</p></blockquote>}
-      <p className="viva-q-text">{q.text}</p>
+      <div className="report-q">
+        <span className="label">Question asked</span>
+        <p>{q.text}</p>
+      </div>
       {q.reviewer_note && (
         <p className="viva-reviewer-note small"><strong>What a good answer covers</strong> (not shown to the student): {q.reviewer_note}</p>
       )}
 
       {q.answer_kind === null && <p className="muted">Not answered yet.</p>}
       {q.answer_kind === "skipped" && <p className="note">No answer: the time ran out.</p>}
-      {q.answer_kind === "typed" && <div className="text-view">{q.typed_answer}</div>}
+      {q.answer_kind === "typed" && (
+        <div className="report-answer">
+          <span className="label">The student’s answer</span>
+          <div className="report-answer-text">{q.typed_answer}</div>
+        </div>
+      )}
       {q.answer_kind === "spoken" && q.recording && (
         <>
           <MediaPlayer recordingId={q.recording.id} status={q.recording.status} video={q.recording.has_video} />
@@ -160,8 +214,6 @@ function QuestionReport({ q, canAssess, invitationId, onSaved }: {
 
       {q.answer_kind && <Signals s={q.signals} seconds={q.seconds_taken} />}
       {q.followup_decision && <Decision d={q.followup_decision} />}
-      {canAssess && <Assessment invitationId={invitationId} questionId={q.id} current={q.assessment} canAssess onSaved={onSaved} />}
-      {!canAssess && q.assessment && <p className="small">Rated: <strong>{ratingLabel[q.assessment.rating]}</strong>{q.assessment.note && `: ${q.assessment.note}`}</p>}
     </section>
   );
 }
@@ -243,10 +295,10 @@ function Timeline({ t }: { t: VivaTimeline }) {
 function Signals({ s, seconds }: { s: VivaSignals; seconds: number | null }) {
   const items: string[] = [];
   if (seconds !== null) items.push(`Answered ${seconds}s after the question appeared`);
-  items.push(s.focus_lost ? `Left the page ${s.focus_lost} time(s), ${s.away_seconds}s in total` : "Stayed on the page");
+  items.push(s.focus_lost ? `Left the page ${plural(s.focus_lost, "time")}, ${s.away_seconds}s in total` : "Stayed on the page");
   if (s.paste_blocked) items.push(`${s.paste_blocked} paste attempt(s) blocked`);
   if (s.copy_blocked) items.push(`${s.copy_blocked} copy attempt(s) blocked`);
-  if (s.fullscreen_exit) items.push(`Left full screen ${s.fullscreen_exit} time(s)${s.fullscreen_out_seconds ? `, ${s.fullscreen_out_seconds}s in total` : ""}`);
+  if (s.fullscreen_exit) items.push(`Left full screen ${plural(s.fullscreen_exit, "time")}${s.fullscreen_out_seconds ? `, ${s.fullscreen_out_seconds}s in total` : ""}`);
   if (s.camera_unavailable) items.push("No camera video for this answer (camera off or unavailable)");
   if (s.late_write) items.push(`${s.late_write} answer(s) arrived after the time limit and were refused`);
   return (
@@ -262,39 +314,52 @@ function Assessment({ invitationId, questionId, current, canAssess, onSaved }: {
   const { api } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rating, setRating] = useState<string>(current?.rating ?? "");
+  const [note, setNote] = useState("");
   return (
-    <div className="viva-assess">
+    <div className="stack-sm">
       {current && (
-        <p className="small">
-          Current rating: <strong>{ratingLabel[current.rating]}</strong>{current.note && `: ${current.note}`}
+        <p className="small" style={{ margin: 0 }}>
+          Rated <strong>{ratingLabel[current.rating]}</strong>{current.note && `: ${current.note}`}
           <span className="muted"> ({current.created_by_email}, {fmtDate(current.created_at)})</span>
         </p>
       )}
       {canAssess && (
-        <form className="form inline" onSubmit={async (e) => {
+        <form className="stack-sm" onSubmit={async (e) => {
           e.preventDefault();
-          const f = new FormData(e.currentTarget);
           setBusy(true);
           setError(null);
           try {
             await api(`/viva-invitations/${invitationId}/assessments`, {
               method: "POST",
-              body: JSON.stringify({ question_id: questionId, rating: f.get("rating"), note: f.get("note") || null }),
+              body: JSON.stringify({ question_id: questionId, rating, note: note || null }),
             });
+            setNote("");
             onSaved();
           } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
         }}>
-          <Field label={current ? "New rating" : "Rating"}>
-            <select name="rating" required defaultValue={current?.rating ?? ""}>
-              <option value="" disabled>Choose…</option>
-              {Object.entries(ratingLabel).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+          <fieldset className="options">
+            <legend>{current ? "Change the rating" : questionId ? "How does this answer read?" : "Your view of the whole viva"}</legend>
+            {Object.entries(ratingLabel).map(([v, l]) => (
+              <label key={v} className="option">
+                <input type="radio" name="rating" value={v} required checked={rating === v} onChange={() => setRating(v)} />
+                <span>{l}</span>
+              </label>
+            ))}
+          </fieldset>
+          <Field label="Note (optional)">
+            <textarea rows={2} maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
-          <Field label="Note (optional)"><input name="note" maxLength={4000} /></Field>
-          <button className="btn" disabled={busy}>{busy ? "Saving…" : "Save rating"}</button>
+          <div><button className="btn" disabled={busy || !rating}>{busy ? "Saving…" : questionId ? "Save and go to the next answer" : "Save"}</button></div>
           <ErrorNote error={error} />
         </form>
       )}
     </div>
   );
+}
+
+/** The first few words of a question, so questions of the same type can be told apart in the list. */
+function gist(text: string, words = 7): string {
+  const w = text.trim().split(/\s+/);
+  return w.length <= words ? w.join(" ") : `${w.slice(0, words).join(" ")}…`;
 }

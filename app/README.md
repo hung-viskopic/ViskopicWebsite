@@ -48,7 +48,7 @@ get in: each person must also be invited inside Viskopic, exactly as it will wor
 2. **Institution owner** — sign in as `owner@demo-uni.ac.uk`.
    - Departments: add *School of Law*.
    - Courses: add `LAW1001`.
-   - People & roles: invite `head.law@demo-uni.ac.uk` and make them *Department admin* of School of Law.
+   - People: invite `head.law@demo-uni.ac.uk` and make them *Department admin* of School of Law.
 3. **Department admin** — sign in as `head.law@demo-uni.ac.uk`. Invite `prof.smith@demo-uni.ac.uk` and
    `viewer@demo-uni.ac.uk`; make them *Reviewer* and *Viewer* on `LAW1001`. Try granting a role on a course in
    another department: it's refused.
@@ -57,7 +57,7 @@ get in: each person must also be invited inside Viskopic, exactly as it will wor
    document to see word count, file metadata and any hidden text that was found.
 5. **Isolation check** — as the operator, create a second institution with owner `owner@other-uni.ac.uk`, sign in
    as that owner, and confirm none of Demo University's data is visible.
-6. **Audit** — as `owner@demo-uni.ac.uk`, open *Settings & audit* to see every action, including the operator's.
+6. **Audit** — as `owner@demo-uni.ac.uk`, open *Settings* to see every action in the activity log, including the operator's.
 
 Test hidden-text detection: in Word, add a line of white text (or 1pt text) to an essay before uploading.
 
@@ -72,21 +72,22 @@ It currently needs **8 baseline documents of at least 1,650 words each**, and su
 The profile builds itself once those are uploaded (see the student's page; it takes a minute or so) and any
 waiting cases are analysed again.
 
-Before the model compares anything, a reviewer **quality-reviews** each text: open the document, read the
-extracted text and record *English prose / clean extraction* under *Quality review*. Every baseline document and
+Before the model compares anything, a reviewer **checks** each text: on the Cases page choose **Check N texts**
+(or open the document's *File details* tab, *Was the text read correctly?*) and answer *English* and *reads
+normally*. Every baseline document and
 the submission need one; the case is analysed again after each review. Every scored result is labelled
 experimental. For quick local trials, `VISKOPIC_ALLOW_UNREVIEWED_CONSISTENCY=true` in `app/.env` scores
 unreviewed texts too, clearly labelled as an unreviewed demonstration (demonstration profiles need it, since
 their research papers can't be reviewed here). Keep it off anywhere outside local development.
 
-No essays that long to hand? On the student's page, under *Consistency profile*, choose **Use a demonstration
+No essays that long to hand? On the student's page, open *Technical details: writing style profile* and choose **Use a demonstration
 profile**. That compares the student's submissions with one of the model's research authors instead, so you can
 see the whole report. It is clearly labelled as a demonstration and is switched off with
 `VISKOPIC_ALLOW_DEMO_PROFILES=false`, which must be the setting anywhere outside local development.
 
 ## Removing a wrong upload
 
-Signed in as the institution owner, open the document and choose **Remove document…**, then give a reason. The
+Signed in as the institution owner, open the document's *File details* tab and choose **Remove this file**, then give a reason. The
 file and its text are deleted; the page keeps a note of who removed it and why, and the audit log records it. If it
 was a baseline essay, the student's profile is rebuilt without it and their submissions are analysed again; if it
 was a submission, its case is withdrawn.
@@ -115,8 +116,25 @@ The backend tests run against a real PostgreSQL so row-level security is genuine
 cd app/backend
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements-dev.txt
-# with the compose stack running, use its Postgres as the test server:
-VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres pytest
+# with the compose stack running, use its Postgres as the test server. Its init script already created
+# viskopic_app, so pass that role's password (VISKOPIC_APP_PASSWORD in app/.env):
+VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@localhost:15432/postgres \
+VISKOPIC_TEST_APP_PASSWORD=viskopic_app pytest
+```
+
+The tests use a separate `viskopic_test` database and never change an existing role, so they can share the
+running stack's Postgres.
+
+**On Windows**, run them in a Linux container from the backend image: the upload sandbox uses the Unix-only
+`resource` module (rlimits), so the worker can't be imported on Windows. From `app/` in Git Bash:
+
+```sh
+docker compose build api
+MSYS_NO_PATHCONV=1 docker run --rm --network viskopic_default --user root \
+  -e VISKOPIC_TEST_ADMIN_URL=postgresql://viskopic:viskopic@postgres:5432/postgres \
+  -e VISKOPIC_TEST_APP_PASSWORD=viskopic_app -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$(pwd -W)/backend:/src:ro" -w /src viskopic-api \
+  sh -c "pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider -q"
 ```
 
 They cover: operator isolation, cross-tenant isolation at API and raw-SQL level, delegated role rules, last-owner
