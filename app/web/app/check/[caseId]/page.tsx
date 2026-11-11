@@ -93,7 +93,7 @@ export default function CheckTexts() {
           <div className="split">
             <div className="main-col stack-sm">
               <div className="card-head" style={{ marginBottom: 0 }}>
-                <h1 style={{ fontSize: 26, margin: 0 }}>
+                <h1 style={{ fontSize: "var(--fs-xl)", margin: 0 }}>
                   {doc.role === "submission" ? "The essay being checked" : "Past essay"}: {doc.original_filename}
                 </h1>
                 <span className="muted">{doc.word_count.toLocaleString()} words{doc.provenance === "supervised" ? " · written in an exam" : ""}</span>

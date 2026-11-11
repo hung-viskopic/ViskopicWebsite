@@ -175,14 +175,22 @@ function QuestionReport({ q }: { q: VivaReportQuestion }) {
         </span>
       </div>
       {q.passage && <blockquote className="viva-passage"><span className="label">Passage shown</span><p>{q.passage}</p></blockquote>}
-      <p className="viva-q-text">{q.text}</p>
+      <div className="report-q">
+        <span className="label">Question asked</span>
+        <p>{q.text}</p>
+      </div>
       {q.reviewer_note && (
         <p className="viva-reviewer-note small"><strong>What a good answer covers</strong> (not shown to the student): {q.reviewer_note}</p>
       )}
 
       {q.answer_kind === null && <p className="muted">Not answered yet.</p>}
       {q.answer_kind === "skipped" && <p className="note">No answer: the time ran out.</p>}
-      {q.answer_kind === "typed" && <div className="text-view plain">{q.typed_answer}</div>}
+      {q.answer_kind === "typed" && (
+        <div className="report-answer">
+          <span className="label">The student’s answer</span>
+          <div className="report-answer-text">{q.typed_answer}</div>
+        </div>
+      )}
       {q.answer_kind === "spoken" && q.recording && (
         <>
           <MediaPlayer recordingId={q.recording.id} status={q.recording.status} video={q.recording.has_video} />

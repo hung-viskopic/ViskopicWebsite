@@ -52,7 +52,7 @@ export default function Home() {
     <div className="stack">
       <section className="page-header" style={{ marginBottom: 0 }}>
         <div className="stack-sm" style={{ maxWidth: 760 }}>
-          <h1 style={{ fontSize: "clamp(30px, 3.4vw, 38px)" }}>
+          <h1>
             {list.data === null ? "Cases" : needYou === 0 ? "Nothing needs you right now" : `${plural(needYou, "case")} ${needYou === 1 ? "needs" : "need"} you`}
           </h1>
           {list.data && (
@@ -87,7 +87,7 @@ export default function Home() {
 
       {quiet.length > 0 && (
         <details className="card">
-          <summary style={{ fontSize: 18 }}>No flag, rated or closed ({quiet.length})</summary>
+          <summary style={{ fontSize: "var(--fs-md)" }}>No flag, rated or closed ({quiet.length})</summary>
           <div style={{ marginTop: 12 }}>
             {quiet.map((c) => <Row key={c.id} c={c} />)}
           </div>

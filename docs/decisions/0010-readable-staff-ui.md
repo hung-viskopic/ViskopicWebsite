@@ -35,3 +35,13 @@ or email instead of `prompt()`/`alert()`.
 
 Rating values (`consistent`, `unclear`, `concern`) and their labels, case statuses, evidence statements and every
 API used by the old screens. Closing a case with no action and a setup checklist were designed but not built.
+
+## Addendum: design critique fixes (2026-11-11)
+
+- **The viva report leads with the answer.** The reviewer rates the answer, so a typed answer is set in Literata
+  at the reading size with a magenta rule; the question sits above it at body size, labelled "Question asked".
+  The student's own viva page keeps its large question.
+- **Evidence and essay stay in view together on narrower screens.** At 1,080px and below the columns stack; an
+  open essay becomes a sheet over the lower half of the screen and the chosen finding scrolls above it.
+- **One type scale.** Font sizes are tokens on `:root` (`--fs-xs` 14, `--fs-sm` 15, `--fs-base` 17, `--fs-md` 18,
+  `--fs-lg` 21, `--fs-xl` 26, `--fs-2xl` 28–34, `--fs-display` 40). Use a token, never a pixel size.

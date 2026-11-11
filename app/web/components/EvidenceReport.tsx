@@ -294,8 +294,15 @@ function RunEvidence({ title, run, selectedKey, onShow }: {
 
 function Evidence({ ev, on, onShow }: { ev: EvidenceItem; on: boolean; onShow: () => void }) {
   const hasNums = ev.observed !== null && ev.baseline_mean !== null;
+  const ref = useRef<HTMLDivElement>(null);
+  // When the essay opens as a sheet over the lower half (narrow screens), keep the chosen finding above it.
+  useEffect(() => {
+    if (on && window.matchMedia("(max-width: 1080px)").matches) {
+      ref.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }, [on]);
   return (
-    <div className={on ? "ev on" : "ev"}>
+    <div className={on ? "ev on" : "ev"} ref={ref}>
       <div className="ev-head">
         <h3>{heading(ev)}</h3>
         {ev.z_score !== null && <span className="muted small">{Math.abs(ev.z_score).toFixed(1)} spreads {ev.z_score > 0 ? "higher" : "lower"}</span>}
@@ -342,10 +349,10 @@ function EssayPanel({ text, selected, onOpen, onClose }: {
   }
   const n = selected?.spans.length ?? 0;
   return (
-    <section className="card essay">
+    <section className="card essay essay-open" aria-label="The essay">
       <div className="essay-head">
         <div>
-          <h2 style={{ margin: 0, fontSize: 19 }}>The essay</h2>
+          <h2 className="essay-title">The essay</h2>
           <span className="muted small">
             {n ? `${plural(n, "passage")} highlighted` : "Choose “Show in essay” on a finding"}
             {selected?.spans.some((s) => s.status === "approximate") && " (edges are approximate)"}
