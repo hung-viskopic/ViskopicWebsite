@@ -7,6 +7,7 @@ import { ErrorNote, Field, PageHeader, Status } from "@/components/ui";
 import { qtypeLabel } from "@/components/VivaPanel";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, useResource } from "@/lib/hooks";
+import { plural } from "@/lib/words";
 import type { FollowupDecision, VivaAssessment, VivaReport, VivaReportQuestion, VivaSignals, VivaTimeline } from "@/lib/types";
 
 const ratingLabel = { consistent: "Consistent with authorship", unclear: "Unclear", concern: "Concern" } as const;
@@ -88,6 +89,7 @@ export default function VivaReportPage() {
                 <button key={x.id} className={x.id === sel ? "on" : ""} onClick={() => setSel(x.id)} aria-current={x.id === sel ? "true" : undefined}>
                   <b className={x.assessment ? "" : "open"}>{x.position}</b>
                   <span>{x.parent_id ? "Follow-up" : qtypeLabel[x.qtype ?? ""] ?? "Question"}
+                    {x.text && <span className="qnav-gist">{gist(x.text)}</span>}
                     <small>{x.assessment ? ratingLabel[x.assessment.rating] : x.answer_kind === null ? "Not answered" : x.answer_kind === "skipped" ? "No answer" : "Not rated"}</small>
                   </span>
                 </button>
@@ -114,7 +116,7 @@ export default function VivaReportPage() {
                   <dt>Previewed</dt><dd>{r.visq2?.previewed ? "Yes" : "No"}</dd></>
               )}
               {r.visq2?.status === "failed" && (<><dt>Visq</dt><dd className="error">Could not read the essay: {r.visq2.error}</dd></>)}
-              <dt>Opened on another device</dt><dd>{r.session.second_sessions === 0 ? "No" : `${r.session.second_sessions} time(s)`}</dd>
+              <dt>Opened on another device</dt><dd>{r.session.second_sessions === 0 ? "No" : plural(r.session.second_sessions, "time")}</dd>
               {inv.revoke_reason && (<><dt>Withdrawn</dt><dd>{fmtDate(inv.revoked_at)}: {inv.revoke_reason}</dd></>)}
             </dl>
           </details>
@@ -293,10 +295,10 @@ function Timeline({ t }: { t: VivaTimeline }) {
 function Signals({ s, seconds }: { s: VivaSignals; seconds: number | null }) {
   const items: string[] = [];
   if (seconds !== null) items.push(`Answered ${seconds}s after the question appeared`);
-  items.push(s.focus_lost ? `Left the page ${s.focus_lost} time(s), ${s.away_seconds}s in total` : "Stayed on the page");
+  items.push(s.focus_lost ? `Left the page ${plural(s.focus_lost, "time")}, ${s.away_seconds}s in total` : "Stayed on the page");
   if (s.paste_blocked) items.push(`${s.paste_blocked} paste attempt(s) blocked`);
   if (s.copy_blocked) items.push(`${s.copy_blocked} copy attempt(s) blocked`);
-  if (s.fullscreen_exit) items.push(`Left full screen ${s.fullscreen_exit} time(s)${s.fullscreen_out_seconds ? `, ${s.fullscreen_out_seconds}s in total` : ""}`);
+  if (s.fullscreen_exit) items.push(`Left full screen ${plural(s.fullscreen_exit, "time")}${s.fullscreen_out_seconds ? `, ${s.fullscreen_out_seconds}s in total` : ""}`);
   if (s.camera_unavailable) items.push("No camera video for this answer (camera off or unavailable)");
   if (s.late_write) items.push(`${s.late_write} answer(s) arrived after the time limit and were refused`);
   return (
@@ -354,4 +356,10 @@ function Assessment({ invitationId, questionId, current, canAssess, onSaved }: {
       )}
     </div>
   );
+}
+
+/** The first few words of a question, so questions of the same type can be told apart in the list. */
+function gist(text: string, words = 7): string {
+  const w = text.trim().split(/\s+/);
+  return w.length <= words ? w.join(" ") : `${w.slice(0, words).join(" ")}…`;
 }

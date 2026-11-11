@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ErrorNote, Status } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
-import { useResource } from "@/lib/hooks";
+import { fmtDate, useResource } from "@/lib/hooks";
 import type { CaseList, CaseRow, Course, NextStep } from "@/lib/types";
 import { aiSentence, confidenceSentence, plural, shortDate, styleSentence } from "@/lib/words";
 
@@ -135,8 +135,11 @@ function Row({ c }: { c: CaseRow }) {
 }
 
 function describe(c: CaseRow): [React.ReactNode, React.ReactNode] {
+  // The visible label repeats down the page, so the accessible name says which case it opens.
+  const named = [c.student_pseudonym, c.assignment_title, c.course_code, c.original_filename, `uploaded ${fmtDate(c.uploaded_at)}`]
+    .filter(Boolean).join(", ");
   const open = (label: string, primary = true, href = `/documents/${c.document_id}`) =>
-    <Link href={href} className={primary ? "btn" : "btn secondary"}>{label}</Link>;
+    <Link href={href} className={primary ? "btn" : "btn secondary"} aria-label={`${label}: ${named}`}>{label}</Link>;
   const style = styleSentence(c.consistency);
   const ai = aiSentence(c.ai_comparison);
   const conf = confidenceSentence(c);

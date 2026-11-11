@@ -9,6 +9,7 @@ import { ActionForm, ErrorNote, Field, PageHeader, Status } from "@/components/u
 import { useAuth } from "@/lib/auth";
 import { fmtBytes, fmtDate, useResource } from "@/lib/hooks";
 import type { DocumentRow, QualityReview } from "@/lib/types";
+import { plural } from "@/lib/words";
 
 type Detail = DocumentRow & {
   access: "manage" | "view";
@@ -121,13 +122,23 @@ export default function DocumentDetail() {
       )}
 
       {isCase && (
-        <nav className="tabs" aria-label="Case sections">
+        <div className="tabs" role="tablist" aria-label="Case sections">
           {([["evidence", "Evidence"], ["viva", "Viva"], ["file", "File details"]] as [Tab, string][]).map(([t, l]) => (
-            <button key={t} className={current === t ? "on" : ""} aria-current={current === t ? "page" : undefined} onClick={() => go(t)}>{l}</button>
+            <button key={t} id={`tab-${t}`} role="tab" className={current === t ? "on" : ""} aria-selected={current === t}
+              aria-controls="case-panel" tabIndex={current === t ? 0 : -1} onClick={() => go(t)}
+              onKeyDown={(e) => {
+                const order: Tab[] = ["evidence", "viva", "file"];
+                const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+                if (!step) return;
+                const next = order[(order.indexOf(current) + step + order.length) % order.length];
+                go(next);
+                document.getElementById(`tab-${next}`)?.focus();
+              }}>{l}</button>
           ))}
-        </nav>
+        </div>
       )}
 
+      <div id="case-panel" {...(isCase ? { role: "tabpanel", "aria-labelledby": `tab-${current}` } : {})}>
       {isCase && current === "evidence" && (
         <EvidenceReport documentId={d.id} canManage={d.access === "manage"} refreshKey={reportKey}
           onSendViva={d.access === "manage" ? () => { setPlanViva(true); go("viva"); } : undefined} />
@@ -170,7 +181,7 @@ export default function DocumentDetail() {
                     <p className="note">
                       Hidden content found:{" "}
                       {d.signals.hidden_text_spans
-                        .map((h) => (h.chars ? `${h.chars} characters of ${hiddenReason[h.reason] ?? h.reason}` : `${hiddenReason[h.reason] ?? h.reason} on ${h.pages} page(s)`))
+                        .map((h) => (h.chars ? `${h.chars} characters of ${hiddenReason[h.reason] ?? h.reason}` : `${hiddenReason[h.reason] ?? h.reason} on ${plural(h.pages ?? 0, "page")}`))
                         .join("; ")}
                       . It was left out of the text.
                     </p>
@@ -207,6 +218,7 @@ export default function DocumentDetail() {
           )}
         </>
       )}
+      </div>
     </>
   );
 }

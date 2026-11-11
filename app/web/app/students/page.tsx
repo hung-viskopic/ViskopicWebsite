@@ -24,7 +24,7 @@ export default function Students() {
 
   return (
     <>
-      <PageHeader title="Students" meta="Students appear as pseudonyms. Open one to see whether the writing style check can run.">
+      <PageHeader title="Students" meta="You see each student's number and name; the checks only ever see the pseudonym. Open a student to see whether the writing style check can run.">
         <input className="search" type="search" aria-label="Search students" placeholder="Search by pseudonym, number or name"
           value={q} onChange={(e) => setQ(e.target.value)} />
       </PageHeader>
@@ -41,8 +41,8 @@ export default function Students() {
                 <span className="sub">{s.external_ref}{s.display_name ? ` · ${s.display_name}` : ""} · {plural(s.submissions ?? 0, "essay")} checked</span>
               </div>
               <div style={{ flex: "0 1 260px", minWidth: 200 }}>
-                <div className="progress" aria-hidden><span style={{ width: `${Math.min(100, (n / NEEDED) * 100)}%`, background: n >= NEEDED ? "var(--ok)" : undefined }} /></div>
-                <span className="small muted">{n} of {NEEDED} past essays uploaded</span>
+                <div className="progress" aria-hidden><span style={{ width: `${Math.min(100, (n / NEEDED) * 100)}%`, background: n >= NEEDED ? "var(--ok)" : "var(--ink-2)" }} /></div>
+                <span className="small muted">{n >= NEEDED ? `Enough past essays (${n} of ${NEEDED} needed)` : `${n} of ${NEEDED} past essays uploaded`}</span>
               </div>
               {s.status !== "active" && <Status value={s.status} />}
             </div>

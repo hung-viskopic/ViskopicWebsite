@@ -257,7 +257,11 @@ details.quiet > summary { color: var(--blue); font-size: var(--fs-sm); }
 .essay-body { padding: 28px 40px; font-family: var(--serif); font-size: var(--fs-md); line-height: 1.8; white-space: pre-wrap; max-height: 80vh; overflow: auto; }
 .essay-foot { margin: 0; padding: 12px 28px 18px; border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--quiet); }
 .essay-empty { padding: 40px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
-.text-view mark, .essay-body mark { background: var(--mark); color: inherit; border-radius: 3px; box-shadow: 0 0 0 3px var(--mark); }
+.text-view mark, .essay-body mark {
+  background: var(--mark); color: inherit; border-radius: 3px; box-shadow: 0 0 0 3px var(--mark);
+  /* an edge that doesn't rely on the pale fill alone */
+  text-decoration: underline 2px var(--magenta); text-underline-offset: 4px; text-decoration-skip-ink: none;
+}
 .essay-body mark.cur { background: #f5bcd9; box-shadow: 0 0 0 3px #f5bcd9; outline: 2px solid var(--magenta); outline-offset: 3px; }
 
 /* progress through a set (texts to check, past essays) */
@@ -388,6 +392,7 @@ details.quiet > summary { color: var(--blue); font-size: var(--fs-sm); }
 .qnav b { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; font-size: var(--fs-xs); background: var(--ink); color: #fff; }
 .qnav b.open { background: var(--surface); color: var(--ink-2); border: 2px solid var(--field); box-sizing: border-box; }
 .qnav small { display: block; font-size: var(--fs-xs); color: var(--quiet); }
+.qnav-gist { display: block; font-size: var(--fs-sm); font-weight: 400; color: var(--ink-2); line-height: 1.4; margin-top: 2px; }
 .viva-audio { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 4px 0 12px; }
 .viva-audio audio { max-width: 100%; }
 .viva-video { width: 100%; max-width: 480px; border-radius: 12px; background: var(--ink); }
