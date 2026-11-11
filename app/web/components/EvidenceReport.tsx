@@ -78,6 +78,8 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0, onSendVi
   const report = useResource<AnalysisReport>(`/documents/${documentId}/analysis`, poll ? 3000 : undefined);
   const [text, setText] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selection>(null);
+  // The text is fetched once (each fetch is an audited view); hiding it only folds the panel.
+  const [essayOpen, setEssayOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // After an action, keep polling until the case has visibly moved on (its updated_at changes and it is no
@@ -116,12 +118,14 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0, onSendVi
     if (text !== null) return text;
     const t = (await api<{ text: string }>(`/documents/${documentId}/text`)).text;
     setText(t);
+    setEssayOpen(true);
     return t;
   }
 
   async function show(key: string, spans: Span[]) {
     try {
       await loadText();
+      setEssayOpen(true);
       setSelected((s) => (s?.key === key ? null : { key, spans }));
     } catch (e) {
       setError((e as Error).message);
@@ -161,7 +165,9 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0, onSendVi
             ))}
           </div>
           <div className="side-col sticky">
-            <EssayPanel text={text} selected={selected} onOpen={() => loadText().catch((e: Error) => setError(e.message))} />
+            <EssayPanel text={essayOpen ? text : null} selected={selected}
+              onOpen={() => (text !== null ? setEssayOpen(true) : loadText().catch((e: Error) => setError(e.message)))}
+              onClose={() => { setEssayOpen(false); setSelected(null); }} />
           </div>
         </div>
       )}
@@ -319,7 +325,9 @@ function Evidence({ ev, on, onShow }: { ev: EvidenceItem; on: boolean; onShow: (
   );
 }
 
-function EssayPanel({ text, selected, onOpen }: { text: string | null; selected: Selection; onOpen: () => void }) {
+function EssayPanel({ text, selected, onOpen, onClose }: {
+  text: string | null; selected: Selection; onOpen: () => void; onClose: () => void;
+}) {
   if (text === null) {
     return (
       <section className="card essay">
@@ -336,11 +344,14 @@ function EssayPanel({ text, selected, onOpen }: { text: string | null; selected:
   return (
     <section className="card essay">
       <div className="essay-head">
-        <h2 style={{ margin: 0, fontSize: 19 }}>The essay</h2>
-        <span className="muted small">
-          {n ? `${plural(n, "passage")} highlighted` : "Choose “Show in essay” on a finding"}
-          {selected?.spans.some((s) => s.status === "approximate") && " (edges are approximate)"}
-        </span>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 19 }}>The essay</h2>
+          <span className="muted small">
+            {n ? `${plural(n, "passage")} highlighted` : "Choose “Show in essay” on a finding"}
+            {selected?.spans.some((s) => s.status === "approximate") && " (edges are approximate)"}
+          </span>
+        </div>
+        <button className="btn secondary sm" onClick={onClose}>Hide the essay</button>
       </div>
       <HighlightedText text={text} spans={selected?.spans ?? []} />
       <p className="essay-foot">Text as Viskopic read it from the file. Opening it is recorded in the activity log.</p>

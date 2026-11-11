@@ -50,6 +50,7 @@ export default function DocumentDetail() {
   const { api } = useAuth();
   const doc = useResource<Detail>(`/documents/${id}`, 3000);
   const [text, setText] = useState<string | null>(null);
+  const [textOpen, setTextOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("evidence");
   const [planViva, setPlanViva] = useState(false);
@@ -71,7 +72,8 @@ export default function DocumentDetail() {
 
   async function showText() {
     try {
-      setText((await api<{ text: string }>(`/documents/${id}/text`)).text);
+      if (text === null) setText((await api<{ text: string }>(`/documents/${id}/text`)).text);
+      setTextOpen(true);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -195,9 +197,11 @@ export default function DocumentDetail() {
             <section className="card">
               <div className="card-head">
                 <h2>Text as Viskopic read it</h2>
-                {text === null && <button className="btn secondary" onClick={showText}>Show the text</button>}
+                {textOpen
+                  ? <button className="btn secondary" onClick={() => setTextOpen(false)}>Hide the text</button>
+                  : <button className="btn secondary" onClick={showText}>Show the text</button>}
               </div>
-              {text !== null && <div className="text-view">{text}</div>}
+              {textOpen && text !== null && <div className="text-view">{text}</div>}
               <p className="hint section-gap">Opening the text is recorded in the activity log.</p>
             </section>
           )}
