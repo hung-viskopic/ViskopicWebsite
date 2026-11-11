@@ -67,8 +67,9 @@ def test_txt_and_baseline_summary(client, tenant_factory):
         assert upload(client, reviewer, course, student, f"b{i}.txt", words.encode()).status_code == 201
     drain()
     s = client.get(f"/api/students/{student}", headers=reviewer).json()
-    assert s["baseline"]["essays"] == 3 and s["baseline"]["words"] == 1800
-    assert s["baseline"]["eligible"] is True and s["baseline"]["confidence"] == "medium"
+    # Three 600-word texts are on file but too short for the writing style check (see test_cases).
+    assert s["baseline"]["essays"] == 0 and s["baseline"]["too_short"] == 3
+    assert s["baseline"]["eligible"] is False and s["baseline"]["confidence"] is None
 
 
 def test_upload_rejections(client, tenant_factory):

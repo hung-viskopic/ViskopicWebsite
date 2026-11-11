@@ -1,20 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { ErrorNote, Status } from "@/components/ui";
+import { ErrorNote, Status, type Tone } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, useResource } from "@/lib/hooks";
-import type { AnalysisReport, AnalysisRun, CombinedPart, CombinedReport, ConsistencyMeasurements, EvidenceItem, Span } from "@/lib/types";
+import type { AnalysisReport, AnalysisRun, CombinedReport, ConsistencyMeasurements, EvidenceItem, Span } from "@/lib/types";
+import { aiSentence, plural, styleSentence } from "@/lib/words";
 
-const caseStatus: Record<string, string> = {
-  analysing: "Analysing",
-  awaiting_baseline: "Waiting for a baseline",
-  awaiting_review: "Waiting for a quality review",
-  evidence_ready: "Evidence ready",
-  failed: "Analysis failed",
-  withdrawn: "Withdrawn (document removed)",
-};
-
+/** The model's own labels, shown word for word in the technical details. */
 const outcomeLabel: Record<string, string> = {
   "same-author-compatible": "Style compatible with the reference profile",
   "stylistically-unusual": "Stylistically unusual relative to the reference profile",
@@ -22,28 +16,33 @@ const outcomeLabel: Record<string, string> = {
   not_interchangeable: "Parts depend on each other more than in AI essays",
 };
 
-const combinedTitle: Record<CombinedReport["status"], string> = {
-  review_recommended: "Review recommended",
-  no_flag: "No flag",
-  insufficient_evidence: "Not enough information",
-};
-
-/** Titles for Δ states that carry no score or verdict (the model team's website contract). */
+/** Δ states that carry no score or verdict (the model team's website contract). */
 const notScoredTitle: Record<string, string> = {
-  insufficient_evidence: "More writing needed",
-  quality_review_required: "Text quality review needed",
-  unsupported_text: "Unsupported text",
-  cannot_score: "Comparison unavailable",
-  demo_requires_unreviewed_mode: "Demonstration profile can't be scored here",
+  insufficient_evidence: "More past writing is needed",
+  quality_review_required: "Texts need checking first",
+  unsupported_text: "These texts can't be compared",
+  cannot_score: "The comparison couldn't run",
+  demo_requires_unreviewed_mode: "This demonstration profile can't be scored here",
 };
 
 const qualityLabel: Record<string, string> = {
-  passed: "reviewed",
-  unreviewed: "not reviewed",
-  stale_review: "review out of date",
+  passed: "checked",
+  unreviewed: "not checked",
+  stale_review: "checked, but the text has changed since",
   unsupported_text: "not supported",
   not_checked: "not checked",
 };
+
+/** Plain headings for evidence kinds whose template statement doesn't start with its own label. */
+const kindHeading: Record<string, string> = {
+  interchangeability: "How the opening relates to the rest of the essay",
+  comparison_coverage: "Which AI essays it was compared with",
+  hidden_text: "Hidden text in the file",
+  editing_time: "Editing time recorded in the file",
+};
+
+/** Items that describe the method rather than this essay: shown in the technical details. */
+const METHOD_KINDS = new Set(["overall_score", "style_distance", "threshold_validation"]);
 
 /** Model numbers as the model team displays them: 3 decimals, tiny values as "Near zero", never a percentage. */
 export function formatScore(value: number | null | undefined): string {
@@ -53,66 +52,26 @@ export function formatScore(value: number | null | undefined): string {
   return value.toFixed(3);
 }
 
-const categoryLabel: Record<string, string> = {
-  style: "Writing style",
-  regeneration: "AI comparison",
-  document: "Document",
-};
+function num(v: number) {
+  return Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : Number(v.toFixed(2)).toLocaleString();
+}
+
+/** The heading is the model's own label where the statement starts with one ("Sentence length: …"). */
+function heading(ev: EvidenceItem): string {
+  if (kindHeading[ev.kind]) return kindHeading[ev.kind];
+  const i = ev.statement.indexOf(":");
+  return i > 0 && i < 70 ? ev.statement.slice(0, i) : ev.statement.split(". ")[0];
+}
 
 type Selection = { key: string; spans: Span[] } | null;
 
-/** Which pipelines the viewer has opened or folded, remembered in this browser only (a viewing convenience). */
-const OPEN_STORAGE_KEY = "viskopic.report.openPipelines";
-
-function readOpenState(): Record<string, boolean> {
-  try {
-    const raw = window.localStorage.getItem(OPEN_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeOpenState(state: Record<string, boolean>) {
-  try {
-    window.localStorage.setItem(OPEN_STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    /* storage unavailable: the choice just isn't remembered */
-  }
-}
-
-/** Default when the viewer hasn't chosen: completed runs open, placeholders and not-eligible runs folded. */
-function defaultOpen(run: AnalysisRun) {
-  return run.status === "completed";
-}
-
-/** One line shown in a folded pipeline's header so it can be scanned without opening it. */
-function runSummary(run: AnalysisRun): string {
-  const d = run.details;
-  if (run.pipeline === "interchangeability" && run.status === "completed") {
-    return `Score ${formatScore(run.score)} · ${outcomeLabel[run.outcome ?? ""] ?? run.outcome}`;
-  }
-  if (run.pipeline === "consistency" && run.status === "completed") {
-    const label = outcomeLabel[run.outcome ?? ""] ?? run.outcome ?? "";
-    return `Score ${formatScore(run.score)} · ${label}${run.confidence ? ` · ${run.confidence} confidence` : ""}`;
-  }
-  if (run.pipeline === "consistency" && run.status === "not_eligible" && d.website_status) {
-    return notScoredTitle[d.website_status] ?? "Not scored";
-  }
-  if (run.status === "completed") {
-    const n = run.evidence.length;
-    return n ? `${n} observation${n > 1 ? "s" : ""}` : "No notable observations";
-  }
-  return run.reason ?? "";
-}
-
-/** The evidence report for one submission: why, where and how sure, per pipeline. */
-export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
+/** The evidence for one submission: a plain summary, the findings beside the essay, technical details folded. */
+export function EvidenceReport({ documentId, canManage, refreshKey = 0, onSendViva }: {
   documentId: string;
   canManage: boolean;
-  /** Bump this when something elsewhere on the page (e.g. a quality review) re-queues the analysis. */
+  /** Bump this when something elsewhere on the page (e.g. a text check) re-queues the analysis. */
   refreshKey?: number;
+  onSendViva?: () => void;
 }) {
   const { api } = useAuth();
   const [poll, setPoll] = useState(true);
@@ -120,15 +79,10 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
   const [text, setText] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selection>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openState, setOpenState] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   // After an action, keep polling until the case has visibly moved on (its updated_at changes and it is no
   // longer analysing). Watching the status alone misses a re-run that ends in the same status as before.
   const waitRef = useRef<{ since: string | null; started: number } | null>(null);
-
-  useEffect(() => {
-    setOpenState(readOpenState());
-  }, []);
 
   useEffect(() => {
     if (!report.data) return;
@@ -139,12 +93,6 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
     setPoll(c?.status === "analysing" || waitRef.current !== null);
   }, [report.data]);
 
-  function followUp() {
-    waitRef.current = { since: report.data?.case?.updated_at ?? null, started: Date.now() };
-    setPoll(true);
-    report.reload();
-  }
-
   const reload = report.reload;
   useEffect(() => {
     if (refreshKey > 0) {
@@ -154,17 +102,15 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
     }
   }, [refreshKey, reload]);
 
-  function updateOpen(next: Record<string, boolean>) {
-    setOpenState(next);
-    writeOpenState(next);
-  }
-
-  const isOpen = (run: AnalysisRun) => openState[run.pipeline] ?? defaultOpen(run);
-
   if (report.error) return <ErrorNote error={report.error} />;
-  if (!report.data) return null;
+  if (!report.data) return <p className="muted">Loading the evidence…</p>;
   const r = report.data;
   if (r.role !== "submission") return null;
+
+  const style = r.runs.find((x) => x.pipeline === "consistency") ?? null;
+  const ai = r.runs.find((x) => x.pipeline === "interchangeability") ?? null;
+  const doc = r.runs.find((x) => x.pipeline === "document_signals" || x.pipeline === "signals") ?? null;
+  const others = r.runs.filter((x) => x !== style && x !== ai && x !== doc);
 
   async function loadText() {
     if (text !== null) return text;
@@ -176,7 +122,7 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
   async function show(key: string, spans: Span[]) {
     try {
       await loadText();
-      setSelected({ key, spans });
+      setSelected((s) => (s?.key === key ? null : { key, spans }));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -187,7 +133,9 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
     setError(null);
     try {
       await api(`/cases/${r.case!.id}/reanalyse`, { method: "POST" });
-      followUp();
+      waitRef.current = { since: r.case?.updated_at ?? null, started: Date.now() };
+      setPoll(true);
+      report.reload();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -195,239 +143,246 @@ export function EvidenceReport({ documentId, canManage, refreshKey = 0 }: {
     }
   }
 
+  const groups: [string, AnalysisRun | null][] = [["Writing style", style], ["AI comparison", ai], ["The file itself", doc]];
+
   return (
-    <section className="card report">
-      <div className="report-head">
-        <div>
-          <h2>Evidence report</h2>
-          <p className="muted">
-            {r.case ? caseStatus[r.case.status] ?? r.case.status : "Not analysed yet"}
-            {r.case && r.case.status !== "analysing" && (
-              <span className="small"> · last updated {fmtDate(r.case.updated_at)}</span>
-            )}
-          </p>
-        </div>
-        <div className="report-actions">
-          {r.runs.length > 1 && (
-            <>
-              <button
-                className="link"
-                onClick={() => updateOpen({ ...openState, ...Object.fromEntries(r.runs.map((x) => [x.pipeline, true])) })}
-              >
-                Expand all
-              </button>
-              <button
-                className="link"
-                onClick={() => updateOpen({ ...openState, ...Object.fromEntries(r.runs.map((x) => [x.pipeline, false])) })}
-              >
-                Collapse all
-              </button>
-            </>
-          )}
-          {r.case && canManage && r.case.status !== "analysing" && (
-            <button className="btn secondary" onClick={reanalyse} disabled={busy}>
-              {busy ? "Queuing…" : "Run analysis again"}
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="stack">
+      <Summary r={r} style={style} ai={ai} canManage={canManage} busy={busy} onReanalyse={reanalyse} onSendViva={onSendViva} />
       <ErrorNote error={error} />
-      {!r.case && <p className="muted">Analysis starts automatically once the text has been extracted.</p>}
-      {r.case?.status === "analysing" && <p className="muted">Running analysis. This page updates automatically.</p>}
-      {r.case?.status === "awaiting_baseline" && (
-        <p className="note info">
-          Waiting for enough baseline writing from this student. The case is analysed again once the profile is built.
-        </p>
-      )}
-      {r.case?.status === "awaiting_review" && (
-        <p className="note info">
-          The consistency model only compares texts a reviewer has checked. Record a quality review for this
-          submission (above) and for each of the student&apos;s baseline documents; the case is analysed again
-          after each review. The writing-style section below shows which side still needs one.
-        </p>
-      )}
 
-      {r.combined && <CombinedCard c={r.combined} />}
-
-      {r.runs.map((run) => (
-        <RunCard
-          key={run.id}
-          run={run}
-          open={isOpen(run)}
-          onToggle={() => updateOpen({ ...openState, [run.pipeline]: !isOpen(run) })}
-          selectedKey={selected?.key ?? null}
-          onShow={show}
-        />
-      ))}
+      {r.case && r.case.status !== "analysing" && (
+        <div className="split">
+          <div className="main-col">
+            {groups.map(([title, run]) => run && (
+              <RunEvidence key={title} title={title} run={run} selectedKey={selected?.key ?? null} onShow={show} />
+            ))}
+            {others.map((run) => (
+              <RunEvidence key={run.id} title={run.label} run={run} selectedKey={selected?.key ?? null} onShow={show} />
+            ))}
+          </div>
+          <div className="side-col sticky">
+            <EssayPanel text={text} selected={selected} onOpen={() => loadText().catch((e: Error) => setError(e.message))} />
+          </div>
+        </div>
+      )}
 
       {r.runs.length > 0 && (
-        <p className="muted small">
-          These results support a review. They are not a finding of misconduct, and no outcome has been recorded.
-          {r.total_runs && r.total_runs > r.runs.length ? ` Earlier analysis runs are kept (${r.total_runs} in total).` : ""}
-        </p>
-      )}
-
-      {text !== null && (
-        <div className="report-text">
-          <div className="report-text-head">
-            <h3>Where</h3>
-            <span className="muted small">
-              {selected?.spans.length
-                ? `${selected.spans.length} highlighted passage${selected.spans.length > 1 ? "s" : ""}`
-                : "Choose Show in text on an evidence item."}
-              {selected?.spans.some((s) => s.status === "approximate") && " (approximate boundaries)"}
-            </span>
+        <details className="card">
+          <summary>Technical details: scores, thresholds and versions</summary>
+          <div className="stack-sm" style={{ marginTop: 16 }}>
+            {r.combined && <CombinedDetails c={r.combined} />}
+            {r.runs.map((run) => <RunDetails key={run.id} run={run} />)}
+            {r.total_runs && r.total_runs > r.runs.length ? (
+              <p className="muted small">Earlier runs are kept ({r.total_runs} in total).</p>
+            ) : null}
           </div>
-          <HighlightedText text={text} spans={selected?.spans ?? []} />
-          <p className="muted small section-gap">Opening the text is recorded in the audit log.</p>
-        </div>
+        </details>
       )}
-    </section>
-  );
-}
-
-function RunCard({ run, open, onToggle, selectedKey, onShow }: {
-  run: AnalysisRun;
-  open: boolean;
-  onToggle: () => void;
-  selectedKey: string | null;
-  onShow: (key: string, spans: Span[]) => void;
-}) {
-  const d = run.details;
-  const bodyId = `run-body-${run.id}`;
-  const summary = runSummary(run);
-  return (
-    <div className={`run run-${run.status}${open ? " open" : " folded"}`}>
-      <h3 className="run-head">
-        <button type="button" className="run-toggle" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
-          <span className="chevron" aria-hidden="true" />
-          <span className="run-title">{run.label}</span>
-          <Status value={run.status === "not_eligible" ? "not eligible" : run.status} />
-          {!open && summary && <span className="run-summary">{summary}</span>}
-        </button>
-      </h3>
-
-      <div id={bodyId} className="run-body" hidden={!open}>
-
-        {run.pipeline === "consistency" && run.status === "not_eligible" && d.website_status && (
-          <p className="not-scored-title">{notScoredTitle[d.website_status] ?? "Not scored"}</p>
-        )}
-        {run.reason && <p className="muted">{run.reason}</p>}
-        {run.pipeline === "consistency" && run.status === "not_eligible" && d.quality && d.website_status !== "insufficient_evidence" && (
-          <p className="muted small">
-            Submission: {qualityLabel[d.quality.candidate] ?? d.quality.candidate}. Baseline documents:{" "}
-            {qualityLabel[d.quality.references] ?? d.quality.references}.
-          </p>
-        )}
-
-        {run.pipeline === "consistency" && run.status === "completed" && (
-          <>
-            <p className="experimental">
-              <span className="status status-medium">Experimental</span>
-              {d.website_status === "scored_demo_unreviewed"
-                ? " Unreviewed demonstration: nobody has checked the language and extraction of these texts."
-                : " Input quality reviewed. The model is not yet validated for student writing."}
-            </p>
-            {run.profile?.source === "demonstration" && (
-              <p className="note">
-                Demonstration only. Compared with research author {run.profile.demo_author_id}, not this student&apos;s
-                own writing.
-              </p>
-            )}
-            <div className="stats">
-              <div className="stat">
-                <p className="label">Centred style score (V1.3)</p>
-                <strong>{formatScore(run.score)}</strong>
-                <span className="muted small">Frozen threshold {formatScore(run.threshold)}</span>
-              </div>
-              <div className="stat">
-                <p className="label">Model label</p>
-                <span className="outcome">{outcomeLabel[run.outcome ?? ""] ?? run.outcome}</span>
-              </div>
-              <div className="stat">
-                <p className="label">Confidence</p>
-                {run.confidence && <Status value={run.confidence} />}
-                <span className="muted small block">{d.confidence_reason}</span>
-              </div>
-            </div>
-            {d.measurements && <Measurements m={d.measurements} />}
-            {d.interpretation_warning && <p className="muted small">{d.interpretation_warning}</p>}
-          </>
-        )}
-
-        {run.pipeline === "interchangeability" && run.status === "completed" && (
-          <>
-            <p className="experimental">
-              <span className="status status-medium">Experimental</span>
-              {" "}Compares the essay&apos;s opening with AI essays written to the same assignment prompt. The threshold
-              of 0 was validated on school essays (about 1 in 10 human essays fall below it); for university essays
-              it is experimental and may flag more human essays.
-            </p>
-            <div className="stats">
-              <div className="stat">
-                <p className="label">AI comparison score</p>
-                <strong>{formatScore(run.score)}</strong>
-                <span className="muted small">Threshold {formatScore(run.threshold)}; higher reads more human</span>
-              </div>
-              <div className="stat">
-                <p className="label">Model label</p>
-                <span className="outcome">{outcomeLabel[run.outcome ?? ""] ?? run.outcome}</span>
-              </div>
-              <div className="stat">
-                <p className="label">Comparison essays</p>
-                <span>{(d.families ?? []).join(", ")}</span>
-                {run.confidence && <span className="block"><Status value={run.confidence} /></span>}
-              </div>
-            </div>
-          </>
-        )}
-
-        {run.evidence.length > 0 && (
-          <ol className="evidence">
-            {run.evidence.map((ev) => {
-              const key = `${run.id}:${ev.ordinal}`;
-              return (
-                <EvidenceRow key={key} ev={ev} active={selectedKey === key} onShow={() => onShow(key, ev.spans)} />
-              );
-            })}
-          </ol>
-        )}
-        {run.status === "completed" && run.evidence.length === 0 && (
-          <p className="muted">No notable observations.</p>
-        )}
-
-        <p className="muted small">{run.pipeline_version}, {fmtDate(run.created_at)}</p>
-      </div>
     </div>
   );
 }
 
-/** The model team's "either flags" summary over Δ and Pipeline 2. A routing hint for a person, never a finding. */
-function CombinedCard({ c }: { c: CombinedReport }) {
-  const parts: [string, CombinedPart][] = [
-    ["Writing style", c.pipeline1_consistency],
-    ["AI comparison", c.pipeline2_interchangeability],
-  ];
-  const partStatus = { flagged: "Flagged", not_flagged: "Not flagged", unavailable: "Did not run" } as const;
+function Summary({ r, style, ai, canManage, busy, onReanalyse, onSendViva }: {
+  r: AnalysisReport; style: AnalysisRun | null; ai: AnalysisRun | null; canManage: boolean; busy: boolean;
+  onReanalyse: () => void; onSendViva?: () => void;
+}) {
+  const c = r.case;
+  const s = styleSentence(style && { status: style.status, outcome: style.outcome, website_status: style.details.website_status });
+  const a = aiSentence(ai && { status: ai.status, outcome: ai.outcome });
+  const flagged = r.combined?.status === "review_recommended";
+
+  let sentence: string;
+  let tone: "attn" | "calm" = "calm";
+  if (!c) sentence = "The checks start once the file has been read.";
+  else if (c.status === "analysing") sentence = "The checks are running. This page updates by itself.";
+  else if (c.status === "failed") sentence = "The checks couldn't finish.";
+  else if (c.status === "withdrawn") sentence = "This case was withdrawn because the essay was removed.";
+  else if (flagged) {
+    tone = "attn";
+    sentence = s.flagged && a.flagged ? "Both checks flagged this essay. A person should look at the evidence."
+      : s.flagged ? s.text : a.text;
+  } else if (c.status === "awaiting_review") sentence = "Some texts need checking before the writing style check can run.";
+  else if (c.status === "awaiting_baseline") sentence = "Writing style is waiting for more of this student's past essays.";
+  else if (r.combined?.status === "no_flag") sentence = "Neither check flagged this essay.";
+  else sentence = "There isn't enough information to compare yet.";
+
+  const lines: [string, Tone, string][] = [];
+  if (c && c.status !== "analysing") {
+    lines.push(["Writing style", s.flagged ? "attn" : style?.status === "completed" ? "ok" : "calm", s.text]);
+    lines.push(["AI comparison", a.flagged ? "attn" : ai?.status === "completed" ? "ok" : "calm", a.text]);
+  }
+  const conf = style?.status === "completed" && style.confidence;
+  const demo = style?.profile?.source === "demonstration";
+
   return (
-    <div className={`combined combined-${c.status}`} role="status">
-      <div className="combined-head">
-        <h3>{combinedTitle[c.status]}</h3>
-        <span className="muted small">{c.pipelines_run} of 2 checks ran</span>
+    <section className={`card summary tone-${tone}`} style={{ marginBottom: 0 }} role="status">
+      <div className="say">
+        <p className="sentence">{sentence}</p>
+        {lines.length > 0 && (
+          <ul>
+            {lines.map(([k, t, v]) => <li key={k}><Status value="x" tone={t} label={k} /> <span>{v}</span></li>)}
+          </ul>
+        )}
+        {conf && (
+          <p className="muted" style={{ margin: 0 }}>
+            {demo ? "Demonstration only: compared with a research author's papers, not this student's writing."
+              : `${conf[0].toUpperCase()}${conf.slice(1)} confidence. ${String(style!.details.confidence_reason ?? "")}`}
+          </p>
+        )}
+        {(style?.status === "completed" || ai?.status === "completed") && (
+          <p className="hint" style={{ margin: 0 }}>
+            Both checks are experimental. A flag means a person should look; it is never a finding of misconduct.
+          </p>
+        )}
       </div>
-      <ul className="combined-parts">
-        {parts.map(([label, p]) => (
-          <li key={label}>
-            <strong>{label}:</strong> {partStatus[p.status]}. {p.explanation ?? p.reason ?? ""}
-          </li>
-        ))}
-      </ul>
-      {c.coverage_notes.length > 0 && (
-        <ul className="combined-notes muted small">
-          {c.coverage_notes.map((n) => <li key={n}>{n}</li>)}
-        </ul>
+      <div className="act-col">
+        <h2>What next</h2>
+        {flagged && onSendViva && <button className="btn" onClick={onSendViva}>Plan a viva</button>}
+        {c?.status === "awaiting_review" && canManage && <Link href={`/check/${c.id}`} className="btn">Check the texts</Link>}
+        {c?.status === "awaiting_baseline" && <p className="muted" style={{ margin: 0 }}>Upload more past essays from the course page.</p>}
+        {!flagged && c?.status === "evidence_ready" && <p className="muted" style={{ margin: 0 }}>Nothing is needed. You can still plan a viva if you have other concerns.</p>}
+        {c && canManage && c.status !== "analysing" && c.status !== "withdrawn" && (
+          <button className="btn secondary" onClick={onReanalyse} disabled={busy}>{busy ? "Starting…" : "Run the checks again"}</button>
+        )}
+        {c && c.status !== "analysing" && <p className="hint" style={{ margin: 0 }}>Last updated {fmtDate(c.updated_at)}.</p>}
+      </div>
+    </section>
+  );
+}
+
+function RunEvidence({ title, run, selectedKey, onShow }: {
+  title: string; run: AnalysisRun; selectedKey: string | null; onShow: (key: string, spans: Span[]) => void;
+}) {
+  const d = run.details;
+  const items = run.evidence.filter((e) => !METHOD_KINDS.has(e.kind));
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>{title}</h2>
+        {(run.pipeline === "consistency" || run.pipeline === "interchangeability") && run.status === "completed" && (
+          <Status value="x" tone="calm" label="Experimental" />
+        )}
+      </div>
+      {run.status === "not_eligible" && (
+        <>
+          <p><strong>{notScoredTitle[String(d.website_status)] ?? "Not scored"}.</strong> {run.reason}</p>
+          {d.quality && d.website_status !== "insufficient_evidence" && (
+            <p className="muted small">
+              This essay: {qualityLabel[d.quality.candidate] ?? d.quality.candidate}. Past essays:{" "}
+              {qualityLabel[d.quality.references] ?? d.quality.references}.
+            </p>
+          )}
+        </>
       )}
+      {(run.status === "unavailable" || run.status === "failed") && <p className="muted">{run.reason ?? "This check didn't run."}</p>}
+      {run.status === "completed" && items.length === 0 && (
+        <p className="muted">{run.pipeline === "consistency" ? "No single feature stood out." : "Nothing notable."}</p>
+      )}
+      {items.map((ev) => {
+        const key = `${run.id}:${ev.ordinal}`;
+        return <Evidence key={key} ev={ev} on={selectedKey === key} onShow={() => onShow(key, ev.spans)} />;
+      })}
+    </section>
+  );
+}
+
+function Evidence({ ev, on, onShow }: { ev: EvidenceItem; on: boolean; onShow: () => void }) {
+  const hasNums = ev.observed !== null && ev.baseline_mean !== null;
+  return (
+    <div className={on ? "ev on" : "ev"}>
+      <div className="ev-head">
+        <h3>{heading(ev)}</h3>
+        {ev.z_score !== null && <span className="muted small">{Math.abs(ev.z_score).toFixed(1)} spreads {ev.z_score > 0 ? "higher" : "lower"}</span>}
+      </div>
+      {hasNums && (
+        <div className="nums">
+          <div className="num this"><b>{num(ev.observed!)}</b><span>This essay</span></div>
+          <div className="num"><b>{num(ev.baseline_mean!)}</b><span>Past essays{ev.baseline_sd !== null ? `, usually ± ${num(ev.baseline_sd)}` : ""}</span></div>
+        </div>
+      )}
+      {hasNums ? (
+        <details>
+          <summary className="small">Exact finding</summary>
+          <p className="exact">{ev.statement}</p>
+        </details>
+      ) : (
+        <p className="exact" style={{ marginTop: 0 }}>{ev.statement}</p>
+      )}
+      {ev.spans.length > 0 && (
+        <div>
+          <button className="chip-btn" aria-pressed={on} onClick={onShow}>
+            {on ? "Hide in essay" : `Show in essay (${plural(ev.spans.length, "passage")})`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EssayPanel({ text, selected, onOpen }: { text: string | null; selected: Selection; onOpen: () => void }) {
+  if (text === null) {
+    return (
+      <section className="card essay">
+        <div className="essay-empty">
+          <h2 style={{ margin: 0 }}>The essay</h2>
+          <p className="muted" style={{ margin: 0 }}>Open the essay to see the passages each finding refers to.</p>
+          <button className="btn secondary" onClick={onOpen}>Show the essay</button>
+          <p className="hint" style={{ margin: 0 }}>Opening the essay is recorded in the activity log.</p>
+        </div>
+      </section>
+    );
+  }
+  const n = selected?.spans.length ?? 0;
+  return (
+    <section className="card essay">
+      <div className="essay-head">
+        <h2 style={{ margin: 0, fontSize: 19 }}>The essay</h2>
+        <span className="muted small">
+          {n ? `${plural(n, "passage")} highlighted` : "Choose “Show in essay” on a finding"}
+          {selected?.spans.some((s) => s.status === "approximate") && " (edges are approximate)"}
+        </span>
+      </div>
+      <HighlightedText text={text} spans={selected?.spans ?? []} />
+      <p className="essay-foot">Text as Viskopic read it from the file. Opening it is recorded in the activity log.</p>
+    </section>
+  );
+}
+
+/** The model team's "either flags" summary, word for word. A routing hint for a person, never a finding. */
+function CombinedDetails({ c }: { c: CombinedReport }) {
+  return (
+    <div>
+      <h3>Combined result ({c.version})</h3>
+      <p className="small">{c.summary}</p>
+      {c.coverage_notes.length > 0 && <ul className="small muted">{c.coverage_notes.map((n) => <li key={n}>{n}</li>)}</ul>}
       <p className="muted small">{c.interpretation_warning} Review is recommended when either check flags; scores are never averaged.</p>
+    </div>
+  );
+}
+
+function RunDetails({ run }: { run: AnalysisRun }) {
+  const d = run.details;
+  const method = run.evidence.filter((e) => METHOD_KINDS.has(e.kind));
+  const scored = run.status === "completed" && run.score !== null;
+  return (
+    <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+      <h3>{run.label}</h3>
+      {scored && (
+        <dl className="meta">
+          <dt>Score</dt><dd className="mono">{formatScore(run.score)}</dd>
+          <dt>Threshold</dt><dd className="mono">{formatScore(run.threshold)}</dd>
+          {run.outcome && <><dt>Model label</dt><dd>{outcomeLabel[run.outcome] ?? run.outcome}</dd></>}
+          {run.confidence && <><dt>Confidence</dt><dd>{run.confidence}{d.confidence_reason ? `: ${String(d.confidence_reason)}` : ""}</dd></>}
+          {run.pipeline === "interchangeability" && Array.isArray(d.families) && <><dt>Comparison essays</dt><dd>{(d.families as string[]).join(", ")}</dd></>}
+        </dl>
+      )}
+      {d.website_status === "scored_demo_unreviewed" && (
+        <p className="note small">Unreviewed demonstration: nobody has checked the language and extraction of these texts.</p>
+      )}
+      {method.map((e) => <p key={e.ordinal} className="exact">{e.statement}</p>)}
+      {d.measurements && <Measurements m={d.measurements} />}
+      {d.interpretation_warning && <p className="muted small">{d.interpretation_warning}</p>}
+      <p className="muted small">{run.pipeline_version}, {fmtDate(run.created_at)}</p>
     </div>
   );
 }
@@ -443,36 +398,14 @@ function Measurements({ m }: { m: ConsistencyMeasurements }) {
   ];
   return (
     <>
-      <dl className="meta measurements">
-        {rows.map(([k, v]) => (
-          <Fragment key={k}><dt>{k}</dt><dd className="mono">{v}</dd></Fragment>
-        ))}
+      <dl className="meta">
+        {rows.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd className="mono">{v}</dd></Fragment>)}
       </dl>
       <p className="muted small">
-        The centred score is not a percentage or a probability, and can be negative. Near zero means about equal to
-        the background median. Distances are descriptive: they use clipped feature deviations and do not change the
-        label.
+        The centred score is not a percentage or a probability, and can be negative. Distances are descriptive and
+        don&apos;t change the label.
       </p>
     </>
-  );
-}
-
-function EvidenceRow({ ev, active, onShow }: { ev: EvidenceItem; active: boolean; onShow: () => void }) {
-  return (
-    <li className={active ? "active" : undefined}>
-      <div className="evidence-meta">
-        <span className="chip">{categoryLabel[ev.category] ?? ev.category}</span>
-        {ev.contribution !== null && (
-          <span className="contribution" title={`Share of this pipeline's evidence: ${(ev.contribution * 100).toFixed(0)}%`}>
-            <span style={{ width: `${Math.max(4, Math.min(100, ev.contribution * 100))}%` }} />
-          </span>
-        )}
-      </div>
-      <p>{ev.statement}</p>
-      {ev.spans.length > 0 && (
-        <button className="link" onClick={onShow}>Show in text ({ev.spans.length})</button>
-      )}
-    </li>
   );
 }
 
@@ -498,8 +431,8 @@ function HighlightedText({ text, spans }: { text: string; spans: Span[] }) {
   }, [parts]);
 
   return (
-    <div className="text-view" ref={ref}>
-      {parts.map((p, i) => (p.mark ? <mark key={i}>{p.text}</mark> : <Fragment key={i}>{p.text}</Fragment>))}
+    <div className="essay-body" ref={ref} tabIndex={0}>
+      {parts.map((p, i) => (p.mark ? <mark key={i} className={i === parts.findIndex((x) => x.mark) ? "cur" : undefined}>{p.text}</mark> : <Fragment key={i}>{p.text}</Fragment>))}
     </div>
   );
 }

@@ -375,3 +375,61 @@ export type Visq2Preview = {
     model_used: boolean;
   } | null;
 };
+
+// ------------------------------------------------------------------ cases (home page and text checks)
+
+export type NextStep =
+  | "review_evidence" | "check_texts" | "rate_viva" | "viva_problem" | "viva_waiting" | "await_baseline"
+  | "analysing" | "failed" | "viva_rated" | "no_flag" | "withdrawn";
+
+export type CaseRow = {
+  id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  document_id: string;
+  student_id: string;
+  course_id: string;
+  original_filename: string;
+  uploaded_at: string;
+  provenance: "supervised" | "unsupervised";
+  word_count: number | null;
+  assignment_title: string | null;
+  student_pseudonym: string;
+  course_code: string;
+  course_title: string;
+  consistency: {
+    status: string; outcome: string | null; confidence: "low" | "medium" | "high" | null;
+    website_status: string | null; reference_count: number | null; supervised_count: number | null;
+    demonstration: boolean;
+  } | null;
+  ai_comparison: { status: string; outcome: string | null } | null;
+  combined: { status: "review_recommended" | "no_flag" | "insufficient_evidence"; flagged_by: string[] } | null;
+  viva: {
+    id: string; status: string; deadline_at: string; created_at: string; opened_at: string | null;
+    started_at: string | null; submitted_at: string | null; questions: number; rated: number; overall_rated: boolean;
+  } | null;
+  next_step: NextStep;
+  texts_to_check: number;
+};
+
+export type CaseList = { cases: CaseRow[]; counts: Partial<Record<NextStep, number>> };
+
+export type CaseText = {
+  id: string;
+  role: "baseline" | "submission";
+  provenance: "supervised" | "unsupervised";
+  original_filename: string;
+  uploaded_at: string;
+  word_count: number;
+  review: (Omit<QualityReview, "current"> & { current: boolean }) | null;
+  needs_check: boolean;
+};
+
+export type CaseTexts = {
+  case: { id: string; status: string; document_id: string; student_id: string; course_id: string;
+    student_pseudonym: string; original_filename: string; assignment_title: string | null };
+  can_manage: boolean;
+  documents: CaseText[];
+  remaining: number;
+};

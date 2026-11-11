@@ -105,15 +105,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => kc.current?.logout({ redirectUri: window.location.origin }), []);
 
   if (error) {
+    const signedIn = !!kc.current?.authenticated;
     return (
       <div className="center-screen">
-        <div className="card narrow">
-          <h1>Can&apos;t open Viskopic</h1>
-          <p>{error}</p>
-          {kc.current?.authenticated && (
-            <button className="btn" onClick={logout}>
-              Sign out
-            </button>
+        <div className="card narrow stack-sm" style={{ padding: "48px" }}>
+          <h1>{signedIn ? "You're signed in, but you can't use Viskopic yet" : "Can't reach the sign-in service"}</h1>
+          {signedIn ? (
+            <>
+              <p className="lede">
+                Your university hasn&apos;t given this account access, or the invitation was sent to a different
+                address. Ask the person who runs Viskopic in your department to invite your exact university email.
+              </p>
+              <p className="hint">Details: {error}</p>
+              <button className="btn secondary" onClick={logout}>Sign out</button>
+            </>
+          ) : (
+            <p className="lede">{error}</p>
           )}
         </div>
       </div>

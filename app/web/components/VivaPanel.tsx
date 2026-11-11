@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ErrorNote, Field, Status } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { fmtDate, useResource } from "@/lib/hooks";
-import type { DraftQuestion, Visq2Preview, VivaList } from "@/lib/types";
+import type { DraftQuestion, Visq2Preview, VivaInvitation, VivaList } from "@/lib/types";
 
 const kindLabel = { style: "Style viva", reasoning: "Reasoning viva" } as const;
 const sourceLabel: Record<string, string> = { ai_draft: "AI draft", template: "Template", reviewer: "Written by reviewer" };
@@ -15,64 +15,85 @@ export const qtypeLabel: Record<string, string> = {
   tradeoff: "Trade-off", limit: "What if a reason failed", case: "New case", followup: "Follow-up",
 };
 
-/** Viva section on a submission: list of invitations and the form to send a new one. */
-export function VivaPanel({ documentId }: { documentId: string }) {
+/** Viva tab on a case: each invitation as a timeline, and the form to plan a new one. */
+export function VivaPanel({ documentId, startOpen = false }: { documentId: string; startOpen?: boolean }) {
   const vivas = useResource<VivaList>(`/documents/${documentId}/vivas`, 5000);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const [lastLink, setLastLink] = useState<string | null>(null);
   const v = vivas.data;
+  useEffect(() => { if (startOpen) setOpen(true); }, [startOpen]);
 
   return (
-    <section className="card">
-      <div className="card-head">
-        <h2>Viva</h2>
-        {v?.can_manage && v.case && v.case.status !== "withdrawn" && !open && (
-          <button className="btn" onClick={() => { setOpen(true); setLastLink(null); }}>Send viva invitation</button>
-        )}
-      </div>
+    <div className="stack">
       <ErrorNote error={vivas.error} />
-      {v && !v.case && <p className="muted">A viva can be sent once the submission has been processed.</p>}
+      {v && !v.case && <p className="muted">A viva can be planned once the essay has been read.</p>}
       {lastLink && (
-        <p className="note info small" role="status">
-          Invitation queued. The email goes to the student shortly. Test link (for trying the viva yourself):{" "}
+        <p className="note info" role="status">
+          Invitation queued. The email goes to the student shortly. Test link (to try the viva yourself):{" "}
           <a href={lastLink} target="_blank" rel="noreferrer">open the student page</a>
         </p>
       )}
       {open && v?.case && (
-        <InvitationForm caseId={v.case.id} aiEnabled={v.ai_enabled} visqEnabled={v.visq_enabled}
-          onCancel={() => setOpen(false)}
-          onSent={(link) => { setOpen(false); setLastLink(link); vivas.reload(); }} />
+        <section className="card">
+          <InvitationForm caseId={v.case.id} visqEnabled={v.visq_enabled}
+            onCancel={() => setOpen(false)}
+            onSent={(link) => { setOpen(false); setLastLink(link); vivas.reload(); }} />
+        </section>
       )}
-      {v && v.invitations.length > 0 && (
-        <div className="table-wrap section-gap">
-          <table>
-            <thead>
-              <tr><th>Sent</th><th>Type</th><th>Answers</th><th>Status</th><th>Progress</th><th /></tr>
-            </thead>
-            <tbody>
-              {v.invitations.map((i) => (
-                <tr key={i.id}>
-                  <td>{fmtDate(i.created_at)}</td>
-                  <td>{kindLabel[i.viva_kind]}</td>
-                  <td>
-                    <span className="cap">{i.answer_format}</span>{i.camera_required && " with camera"}
-                    {i.flow === "visq2" && <div className="muted small">Visq 2</div>}
-                  </td>
-                  <td><Status value={i.status} />{i.last_error && <div className="muted small">{i.last_error}</div>}</td>
-                  <td>{i.answered ?? 0} of {i.questions ?? 0} answered</td>
-                  <td>
-                    <Link href={`/vivas/${i.id}`}>{i.status === "submitted" ? "Open report" : "Details"}</Link>
-                    {v.can_manage && ["queued", "sent", "opened", "failed", "expired"].includes(i.status) && (
-                      <InvitationActions id={i.id} status={i.status} onDone={(link) => { if (link) setLastLink(link); vivas.reload(); }} />
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {v?.invitations.map((i) => (
+        <Invitation key={i.id} i={i} canManage={v.can_manage}
+          onDone={(link) => { if (link) setLastLink(link); vivas.reload(); }} />
+      ))}
+      {v && v.case && v.invitations.length === 0 && !open && (
+        <section className="card stack-sm">
+          <h2>No viva yet</h2>
+          <p className="lede">A viva asks the student about their own essay. You read the answers and rate them; the rating is not a decision.</p>
+        </section>
+      )}
+      {v?.can_manage && v.case && v.case.status !== "withdrawn" && !open && (
+        <div><button className="btn" onClick={() => { setOpen(true); setLastLink(null); }}>
+          {v.invitations.length ? "Plan another viva" : "Plan a viva"}
+        </button></div>
+      )}
+    </div>
+  );
+}
+
+const stepNames = ["Sent", "Opened", "Started", "Finished"] as const;
+
+function Invitation({ i, canManage, onDone }: { i: VivaInvitation; canManage: boolean; onDone: (link?: string) => void }) {
+  const times = [i.sent_at, i.opened_at, i.started_at, i.submitted_at];
+  const reached = times.filter(Boolean).length;
+  const closed = ["revoked", "expired", "failed", "superseded"].includes(i.status);
+  const tone = i.status === "submitted" ? "ok" : i.status === "failed" || i.status === "expired" ? "err" : closed ? "calm" : "act";
+  return (
+    <section className="card stack-sm">
+      <div className="card-head" style={{ marginBottom: 0 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>{kindLabel[i.viva_kind]}{i.flow === "visq2" ? ", questions by Visq" : ""}</h2>
+          <span className="muted small">Planned {fmtDate(i.created_at)} · due {fmtDate(i.deadline_at)} · {i.answered ?? 0} of {i.questions ?? 0} answered</span>
         </div>
+        <Status value={i.status} tone={tone} />
+      </div>
+      {!closed && (
+        <ol className="timeline">
+          {stepNames.map((n, k) => (
+            <li key={n} className={k < reached ? "done" : k === reached ? "now" : undefined}>
+              <b>{n}</b>{times[k] ? fmtDate(times[k]) : k === reached ? "Waiting" : ""}
+            </li>
+          ))}
+        </ol>
       )}
-      {v && v.case && v.invitations.length === 0 && !open && <p className="muted">No viva has been sent for this submission.</p>}
+      {i.last_error && <p className="note small">{i.last_error}</p>}
+      {i.status === "revoked" && i.revoke_reason && <p className="muted small">Withdrawn: &ldquo;{i.revoke_reason}&rdquo;</p>}
+      <div className="page-actions" style={{ justifyContent: "flex-start" }}>
+        <Link href={`/vivas/${i.id}`} className={i.status === "submitted" ? "btn" : "btn secondary"}>
+          {i.status === "submitted" ? "Read and rate the answers" : "Details"}
+        </Link>
+        {canManage && ["queued", "sent", "opened", "failed", "expired"].includes(i.status) && (
+          <InvitationActions id={i.id} status={i.status} onDone={onDone} />
+        )}
+      </div>
     </section>
   );
 }
@@ -80,6 +101,8 @@ export function VivaPanel({ documentId }: { documentId: string }) {
 function InvitationActions({ id, status, onDone }: { id: string; status: string; onDone: (link?: string) => void }) {
   const { api } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [reason, setReason] = useState("");
   async function resend() {
     try {
       const r = await api<{ test_link: string }>(`/viva-invitations/${id}/resend`, { method: "POST" });
@@ -87,19 +110,31 @@ function InvitationActions({ id, status, onDone }: { id: string; status: string;
     } catch (e) { setError((e as Error).message); }
   }
   async function revoke() {
-    const reason = window.prompt("Why are you withdrawing this invitation?");
-    if (!reason) return;
     try {
       await api(`/viva-invitations/${id}/revoke`, { method: "POST", body: JSON.stringify({ reason }) });
+      setWithdrawing(false);
       onDone();
     } catch (e) { setError((e as Error).message); }
   }
   return (
-    <span className="viva-actions">
-      <button className="link" onClick={resend}>New link</button>
-      {status !== "failed" && status !== "expired" && <button className="link" onClick={revoke}>Withdraw</button>}
+    <>
+      <button className="btn secondary" onClick={resend}>Send a new link</button>
+      {status !== "failed" && status !== "expired" && !withdrawing && (
+        <button className="btn secondary" onClick={() => setWithdrawing(true)}>Withdraw</button>
+      )}
+      {withdrawing && (
+        <div className="inline-form" style={{ flexBasis: "100%" }}>
+          <Field label="Why are you withdrawing this invitation?" hint="Kept in the activity log. The student isn't told the reason.">
+            <textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>
+          <div className="page-actions" style={{ justifyContent: "flex-start" }}>
+            <button className="btn danger" disabled={reason.trim().length < 3} onClick={revoke}>Withdraw invitation</button>
+            <button className="link" onClick={() => setWithdrawing(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
       <ErrorNote error={error} />
-    </span>
+    </>
   );
 }
 
@@ -138,10 +173,8 @@ function Toggle({ checked, onChange, title, children }: {
   );
 }
 
-function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
+function InvitationForm({ caseId, visqEnabled, onCancel, onSent }: {
   caseId: string;
-  /** Transcription of spoken answers (Visq 2 needs it for spoken answers). */
-  aiEnabled: boolean;
   /** Visq 2 world-tree vivas. */
   visqEnabled: boolean;
   onCancel: () => void;
@@ -150,8 +183,6 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
   const { api } = useAuth();
   const [flow, setFlow] = useState<"visq2" | "standard">(visqEnabled ? "visq2" : "standard");
   const [kind, setKind] = useState<"style" | "reasoning">("reasoning");
-  const [format, setFormat] = useState<"spoken" | "typed">("spoken");
-  const [camera, setCamera] = useState(true);
   const [full, setFull] = useState(false);
   const [extMinutes, setExtMinutes] = useState(6);
   const [fullscreen, setFullscreen] = useState(true);
@@ -160,9 +191,8 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const visq2 = flow === "visq2";
-  // Spoken Visq 2 answers are transcribed before Visq reads them, so transcription must be on.
-  const spokenPossible = !visq2 || aiEnabled;
-  const fmt = spokenPossible ? format : "typed";
+  // Spoken answers are not offered for now: every viva is typed (the spoken path stays on the server).
+  const fmt = "typed" as const;
   const stale = !!preview && (preview.visq2_full !== full || preview.extension_minutes !== extMinutes);
   const ready = visq2 ? preview?.status === "ready" && !stale : questions.length > 0;
 
@@ -217,7 +247,7 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
         body: JSON.stringify({
           kind, flow, email: form.get("email"),
           answer_format: fmt,
-          camera: fmt === "spoken" && camera,
+          camera: false,
           fullscreen,
           deadline_days: Number(form.get("deadline_days")),
           prep_seconds: Number(form.get("prep_seconds")),
@@ -234,7 +264,7 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
   return (
     <form className="viva-form" onSubmit={(e) => { e.preventDefault(); send(new FormData(e.currentTarget)); }}>
       <div className="vf-head">
-        <h3>New viva invitation</h3>
+        <h2 style={{ margin: 0 }}>Plan a viva</h2>
         <button type="button" className="link" onClick={onCancel}>Cancel</button>
       </div>
 
@@ -321,17 +351,8 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
       {/* 2. Answering */}
       <fieldset className="vf-section">
         <legend><span className="vf-step">2</span> How the student answers</legend>
+        <p className="muted small">The student types each answer. Pasting is blocked.</p>
         <div className="vf-grid">
-          <div className="vf-control">
-            <span className="label">Answers</span>
-            <Segmented name="Answers" value={fmt} onChange={setFormat} options={[
-              { value: "spoken", label: "Spoken", disabled: !spokenPossible }, { value: "typed", label: "Typed" }]} />
-            <small className="muted">
-              {fmt === "spoken"
-                ? (visq2 ? "Recorded and transcribed. The what-if is always typed." : "Recorded in the browser.")
-                : spokenPossible ? "For students who can't speak their answers. Pasting is blocked." : "Spoken Visq 2 answers need transcription, which is off."}
-            </small>
-          </div>
           <Field label="Think time (seconds)" hint="Before each answer">
             <input name="prep_seconds" type="number" min={0} max={300} defaultValue={visq2 ? 0 : 30} key={`p-${flow}`} required />
           </Field>
@@ -340,11 +361,6 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
           </Field>
         </div>
         <div className="toggle-list">
-          {fmt === "spoken" && (
-            <Toggle checked={camera} onChange={setCamera} title="Record the webcam">
-              Video for you to watch. Nothing analyses it. Turn off for students who can&apos;t use a camera.
-            </Toggle>
-          )}
           <Toggle checked={fullscreen} onChange={setFullscreen} title="Require full screen">
             Laptop or desktop only. Leaving full screen hides the question and is recorded. Turn off if the
             student&apos;s assistive tools don&apos;t work in full screen.
@@ -364,7 +380,7 @@ function InvitationForm({ caseId, aiEnabled, visqEnabled, onCancel, onSent }: {
 
       <ErrorNote error={error} />
       <div className="vf-foot">
-        <button className="btn" disabled={busy !== null || !ready}>{busy === "send" ? "Sending…" : "Send invitation"}</button>
+        <button className="btn" disabled={busy !== null || !ready}>{busy === "send" ? "Sending…" : "Send the invitation"}</button>
         <span className="muted small">
           {visq2 && !ready ? "Prepare and check the questions first." : null}
           {visq2 && ready ? "The essay and answers go to an outside model. Test essays only." : null}

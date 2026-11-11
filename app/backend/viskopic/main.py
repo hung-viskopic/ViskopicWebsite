@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import close_pool
-from .routers import academic, analysis, documents, me, people, platform, viva, viva_public
+from .routers import academic, analysis, cases, documents, me, people, platform, viva, viva_public
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -32,7 +32,7 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     for r in (me.router, platform.router, people.router, academic.router, documents.router, analysis.router,
-              viva.router, viva_public.router):
+              cases.router, viva.router, viva_public.router):
         app.include_router(r, prefix="/api")
 
     app.add_event_handler("shutdown", close_pool)
